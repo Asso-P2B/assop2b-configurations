@@ -1,0 +1,48 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    env_file:
+      - .env
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - assop2b
+
+  website:
+    build:
+      context: ./assop2b-website
+    expose:
+      - "3000"
+    networks:
+      - assop2b
+
+  fe-admin:
+    build:
+      context: ./assop2b-fe-admin
+    expose:
+      - "80"
+    networks:
+      - assop2b
+
+  be-admin:
+    build:
+      context: ./assop2b-be-admin
+    expose:
+      - "8080"
+    networks:
+      - assop2b
+
+networks:
+  assop2b:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

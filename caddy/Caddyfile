@@ -1,0 +1,17 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Decommentare i blocchi quando i rispettivi servizi sono attivi nel docker-compose.
+
+# {$DOMAIN_WEBSITE} {
+# 	reverse_proxy website:3000
+# }
+
+# {$DOMAIN_ADMIN} {
+# 	reverse_proxy fe-admin:80
+# }
+
+# {$DOMAIN_API} {
+# 	reverse_proxy be-admin:8080
+# }

@@ -6,6 +6,14 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(pwd)"
 COMPOSE_MODEL="${SCRIPT_DIR}/docker-compose-model.yml"
+CADDY_DIR="${SCRIPT_DIR}/caddy"
+
+ENV_VARS=(
+  "ACME_EMAIL|Email Let's Encrypt (obbligatoria)"
+  "DOMAIN_WEBSITE|Dominio sito pubblico"
+  "DOMAIN_ADMIN|Dominio frontend admin"
+  "DOMAIN_API|Dominio API backend"
+)
 
 REPOS=(
   "assop2b-website|https://github.com/Asso-P2B/assop2b-website.git"
@@ -74,6 +82,11 @@ check_prerequisites() {
 
   if [[ ! -f "$COMPOSE_MODEL" ]]; then
     error "File non trovato: ${COMPOSE_MODEL}"
+    exit 1
+  fi
+
+  if [[ ! -f "${CADDY_DIR}/Caddyfile" ]]; then
+    error "File non trovato: ${CADDY_DIR}/Caddyfile"
     exit 1
   fi
 
@@ -261,11 +274,60 @@ setup_repositories() {
   return 0
 }
 
+# --- File .env per environment ---
+prompt_env_file() {
+  local env_name="$1"
+  local env_dir="$2"
+  local env_file="${env_dir}/.env"
+  local overwrite=false
+  local confirm
+  local entry key label value
+
+  if [[ -f "$env_file" ]]; then
+    read -r -p "[$env_name] .env già presente. Sovrascrivere? (s/N): " confirm
+    case "$confirm" in
+      s|S|si|Si|SI) overwrite=true ;;
+      *)
+        info "[$env_name] .env esistente conservato."
+        return 0
+        ;;
+    esac
+  else
+    overwrite=true
+  fi
+
+  echo
+  info "=== Configurazione .env per: $env_name ==="
+  info "Usa domini distinti per ogni environment (es. dev.example.com, stage.example.com)."
+  echo
+
+  : > "$env_file"
+
+  for entry in "${ENV_VARS[@]}"; do
+    key="${entry%%|*}"
+    label="${entry#*|}"
+
+    while true; do
+      read -r -p "${label}: " value
+      value="$(echo "$value" | xargs)"
+      if [[ -n "$value" ]]; then
+        printf '%s=%s\n' "$key" "$value" >> "$env_file"
+        break
+      fi
+      warn "Valore obbligatorio. Riprova."
+    done
+  done
+
+  success "[$env_name] .env creato."
+  return 0
+}
+
 # --- Docker Compose ---
 setup_compose() {
   local env_name="$1"
   local env_dir="${BASE_DIR}/${env_name}"
   local compose_file="${env_dir}/docker-compose.yml"
+  local caddy_dest="${env_dir}/caddy"
 
   if [[ -f "$compose_file" ]]; then
     warn "[$env_name] docker-compose.yml già presente — sovrascrittura."
@@ -273,6 +335,15 @@ setup_compose() {
 
   cp "$COMPOSE_MODEL" "$compose_file"
   info "[$env_name] docker-compose.yml copiato."
+
+  if [[ -d "$caddy_dest" ]]; then
+    warn "[$env_name] caddy/ già presente — sovrascrittura."
+    rm -rf "$caddy_dest"
+  fi
+  cp -r "$CADDY_DIR" "$caddy_dest"
+  info "[$env_name] caddy/ copiato."
+
+  prompt_env_file "$env_name" "$env_dir"
 
   info "[$env_name] Avvio container..."
   if (cd "$env_dir" && docker compose up -d); then
