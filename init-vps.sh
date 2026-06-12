@@ -6,14 +6,19 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(pwd)"
 COMPOSE_MODEL="${SCRIPT_DIR}/docker-compose-model.yml"
-CADDY_DIR="${SCRIPT_DIR}/caddy"
+COMPOSE_SHARED_MODEL="${SCRIPT_DIR}/docker-compose-shared-model.yml"
 
 ENV_VARS=(
-  "ACME_EMAIL|Email Let's Encrypt (obbligatoria)"
   "DOMAIN_WEBSITE|Dominio sito pubblico"
   "DOMAIN_ADMIN|Dominio frontend admin"
   "DOMAIN_API|Dominio API backend"
 )
+
+SHARED_ENV_VARS=(
+  "ACME_EMAIL|Email Let's Encrypt (obbligatoria)"
+)
+
+KNOWN_ENVS=(dev stage prod)
 
 REPOS=(
   "assop2b-website|https://github.com/Asso-P2B/assop2b-website.git"
@@ -29,6 +34,7 @@ GIT_ASKPASS_SCRIPT=""
 CREDENTIALS_ACTIVE=false
 FAILED_ENVS=()
 SUCCESS_ENVS=()
+DISCOVERED_ENVS=()
 
 # --- Output ---
 RED='\033[0;31m'
@@ -85,8 +91,8 @@ check_prerequisites() {
     exit 1
   fi
 
-  if [[ ! -f "${CADDY_DIR}/Caddyfile" ]]; then
-    error "File non trovato: ${CADDY_DIR}/Caddyfile"
+  if [[ ! -f "$COMPOSE_SHARED_MODEL" ]]; then
+    error "File non trovato: ${COMPOSE_SHARED_MODEL}"
     exit 1
   fi
 
@@ -322,26 +328,173 @@ prompt_env_file() {
   return 0
 }
 
-# --- Docker Compose ---
+# --- Utility ---
+read_env_var() {
+  local env_file="$1"
+  local key="$2"
+  grep -E "^${key}=" "$env_file" 2>/dev/null | cut -d= -f2- | head -1
+}
+
+# --- Stack condiviso (Caddy + futuri servizi) ---
+discover_environments() {
+  local env
+  DISCOVERED_ENVS=()
+
+  for env in "${KNOWN_ENVS[@]}"; do
+    if [[ -f "${BASE_DIR}/${env}/.env" ]]; then
+      DISCOVERED_ENVS+=("$env")
+    fi
+  done
+}
+
+prompt_shared_env() {
+  local env_file="${BASE_DIR}/.env.shared"
+  local confirm
+  local entry key label value
+
+  if [[ -f "$env_file" ]]; then
+    read -r -p ".env.shared già presente. Sovrascrivere? (s/N): " confirm
+    case "$confirm" in
+      s|S|si|Si|SI) ;;
+      *)
+        info ".env.shared esistente conservato."
+        return 0
+        ;;
+    esac
+  fi
+
+  echo
+  info "=== Configurazione .env.shared (stack condiviso) ==="
+  echo
+
+  : > "$env_file"
+
+  for entry in "${SHARED_ENV_VARS[@]}"; do
+    key="${entry%%|*}"
+    label="${entry#*|}"
+
+    while true; do
+      read -r -p "${label}: " value
+      value="$(echo "$value" | xargs)"
+      if [[ -n "$value" ]]; then
+        printf '%s=%s\n' "$key" "$value" >> "$env_file"
+        break
+      fi
+      warn "Valore obbligatorio. Riprova."
+    done
+  done
+
+  success ".env.shared creato."
+}
+
+generate_caddyfile() {
+  local acme_email="$1"
+  local caddyfile="${BASE_DIR}/caddy/Caddyfile"
+  local env env_file domain_website domain_admin domain_api
+
+  mkdir -p "${BASE_DIR}/caddy"
+
+  cat > "$caddyfile" << EOF
+{
+	email ${acme_email}
+}
+EOF
+
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    env_file="${BASE_DIR}/${env}/.env"
+    domain_website="$(read_env_var "$env_file" DOMAIN_WEBSITE)"
+    domain_admin="$(read_env_var "$env_file" DOMAIN_ADMIN)"
+    domain_api="$(read_env_var "$env_file" DOMAIN_API)"
+
+    cat >> "$caddyfile" << EOF
+
+${domain_website} {
+	reverse_proxy assop2b-${env}-website:3000
+}
+
+${domain_admin} {
+	reverse_proxy assop2b-${env}-fe-admin:80
+}
+
+${domain_api} {
+	reverse_proxy assop2b-${env}-be-admin:8080
+}
+EOF
+  done
+
+  success "caddy/Caddyfile generato."
+}
+
+generate_shared_compose() {
+  local compose_file="${BASE_DIR}/docker-compose.shared.yml"
+  local env line
+
+  {
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == "__CADDY_NETWORKS__" ]]; then
+        for env in "${DISCOVERED_ENVS[@]}"; do
+          echo "      - assop2b-${env}"
+        done
+      elif [[ "$line" == "__EXTERNAL_NETWORKS__" ]]; then
+        for env in "${DISCOVERED_ENVS[@]}"; do
+          echo "  assop2b-${env}:"
+          echo "    external: true"
+        done
+      else
+        echo "$line"
+      fi
+    done < "$COMPOSE_SHARED_MODEL"
+  } > "$compose_file"
+
+  success "docker-compose.shared.yml generato."
+}
+
+setup_shared() {
+  local acme_email
+  local shared_compose="${BASE_DIR}/docker-compose.shared.yml"
+
+  discover_environments
+
+  if [[ ${#DISCOVERED_ENVS[@]} -eq 0 ]]; then
+    warn "Nessun environment con .env trovato — stack condiviso non avviato."
+    return 1
+  fi
+
+  info "Environment rilevati per Caddy: ${DISCOVERED_ENVS[*]}"
+
+  prompt_shared_env
+
+  acme_email="$(read_env_var "${BASE_DIR}/.env.shared" ACME_EMAIL)"
+  if [[ -z "$acme_email" ]]; then
+    error "ACME_EMAIL mancante in .env.shared."
+    return 1
+  fi
+
+  generate_caddyfile "$acme_email"
+  generate_shared_compose
+
+  info "Avvio stack condiviso..."
+  if (cd "$BASE_DIR" && docker compose -f "$shared_compose" up -d); then
+    success "Stack condiviso avviato."
+    return 0
+  fi
+
+  error "docker compose up fallito per lo stack condiviso."
+  return 1
+}
+
+# --- Docker Compose per environment ---
 setup_compose() {
   local env_name="$1"
   local env_dir="${BASE_DIR}/${env_name}"
   local compose_file="${env_dir}/docker-compose.yml"
-  local caddy_dest="${env_dir}/caddy"
 
   if [[ -f "$compose_file" ]]; then
     warn "[$env_name] docker-compose.yml già presente — sovrascrittura."
   fi
 
-  cp "$COMPOSE_MODEL" "$compose_file"
-  info "[$env_name] docker-compose.yml copiato."
-
-  if [[ -d "$caddy_dest" ]]; then
-    warn "[$env_name] caddy/ già presente — sovrascrittura."
-    rm -rf "$caddy_dest"
-  fi
-  cp -r "$CADDY_DIR" "$caddy_dest"
-  info "[$env_name] caddy/ copiato."
+  sed "s/__ENV__/${env_name}/g" "$COMPOSE_MODEL" > "$compose_file"
+  info "[$env_name] docker-compose.yml generato."
 
   prompt_env_file "$env_name" "$env_dir"
 
@@ -404,6 +557,11 @@ print_summary() {
   fi
 
   echo
+  if [[ -f "${BASE_DIR}/docker-compose.shared.yml" ]]; then
+    info "Stack condiviso: ${BASE_DIR}/docker-compose.shared.yml"
+  fi
+
+  echo
   info "I repository clonati non manterranno credenziali GitHub dopo la chiusura dello script."
 }
 
@@ -421,6 +579,8 @@ main() {
   for env in "${SELECTED_ENVS[@]}"; do
     init_environment "$env" || true
   done
+
+  setup_shared || true
 
   print_summary
 
