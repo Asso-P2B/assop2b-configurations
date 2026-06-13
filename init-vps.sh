@@ -33,6 +33,8 @@ GIT_USERNAME=""
 GIT_TOKEN=""
 GIT_ASKPASS_SCRIPT=""
 CREDENTIALS_ACTIVE=false
+CREDENTIALS_CLEANED=false
+SCRIPT_INTERRUPTED=false
 FAILED_ENVS=()
 SUCCESS_ENVS=()
 DISCOVERED_ENVS=()
@@ -51,6 +53,10 @@ error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # --- Cleanup credenziali one-shot ---
 cleanup_credentials() {
+  if [[ "$CREDENTIALS_CLEANED" == true ]]; then
+    return 0
+  fi
+
   if [[ "$CREDENTIALS_ACTIVE" == true ]]; then
     unset GIT_USERNAME GIT_TOKEN GIT_ASKPASS
     if [[ -n "$GIT_ASKPASS_SCRIPT" && -f "$GIT_ASKPASS_SCRIPT" ]]; then
@@ -64,9 +70,64 @@ cleanup_credentials() {
     CREDENTIALS_ACTIVE=false
     info "Credenziali GitHub eliminate dalla sessione."
   fi
+
+  CREDENTIALS_CLEANED=true
 }
 
-trap cleanup_credentials EXIT INT TERM
+interrupt_handler() {
+  SCRIPT_INTERRUPTED=true
+  echo
+  warn "Interruzione richiesta (Ctrl+C). Arresto in corso..."
+  exit 130
+}
+
+cleanup_on_exit() {
+  local status=$?
+  cleanup_credentials
+  if [[ "$SCRIPT_INTERRUPTED" == true || $status -eq 130 || $status -eq 143 ]]; then
+    exit 130
+  fi
+}
+
+check_interrupt() {
+  if [[ "$SCRIPT_INTERRUPTED" == true ]]; then
+    exit 130
+  fi
+}
+
+read_line() {
+  local __outvar=$1
+  shift
+  local reply
+
+  if ! read -r "$@" reply; then
+    echo
+    interrupt_handler
+  fi
+
+  printf -v "$__outvar" '%s' "$reply"
+}
+
+run_docker_compose() {
+  local workdir=$1
+  shift
+
+  pushd "$workdir" >/dev/null || return 1
+  if docker compose "$@"; then
+    popd >/dev/null
+    return 0
+  fi
+
+  local code=$?
+  popd >/dev/null
+  if [[ $code -eq 130 ]]; then
+    interrupt_handler
+  fi
+  return "$code"
+}
+
+trap interrupt_handler INT TERM
+trap cleanup_on_exit EXIT
 
 # --- Prerequisiti ---
 check_prerequisites() {
@@ -106,13 +167,13 @@ setup_github_auth() {
   info "Autenticazione GitHub one-shot (le credenziali non verranno salvate sulla macchina)."
   echo
 
-  read -r -p "GitHub username: " GIT_USERNAME
+  read_line GIT_USERNAME -p "GitHub username: "
   if [[ -z "$GIT_USERNAME" ]]; then
     error "Username obbligatorio."
     exit 1
   fi
 
-  read -r -s -p "GitHub Personal Access Token (PAT, scope repo): " GIT_TOKEN
+  read_line GIT_TOKEN -s -p "GitHub Personal Access Token (PAT, scope repo): "
   echo
   if [[ -z "$GIT_TOKEN" ]]; then
     error "PAT obbligatorio."
@@ -204,6 +265,7 @@ prompt_environments() {
   local choice
 
   while true; do
+    check_interrupt
     echo
     echo "Quali environment inizializzare?"
     echo "  1) dev"
@@ -211,7 +273,7 @@ prompt_environments() {
     echo "  3) prod"
     echo "  4) tutti"
     echo
-    read -r -p "Scelta (es. 1,2 oppure 4): " choice
+    read_line choice -p "Scelta (es. 1,2 oppure 4): "
 
     if parse_environments "$choice"; then
       info "Environment selezionati: ${SELECTED_ENVS[*]}"
@@ -231,13 +293,12 @@ clone_or_update_repo() {
 
   if [[ -d "$repo_dir/.git" ]]; then
     warn "[$env_name] Repository già presente: $(basename "$repo_dir") — aggiornamento branch '$branch'..."
-    (
-      cd "$repo_dir"
-      git_auth remote set-url origin "$repo_url"
-      git_auth fetch origin "$branch"
-      git_auth checkout "$branch"
-      git_auth pull origin "$branch"
-    )
+    pushd "$repo_dir" >/dev/null || return 1
+    git_auth remote set-url origin "$repo_url" || { popd >/dev/null; return 1; }
+    git_auth fetch origin "$branch" || { popd >/dev/null; return 1; }
+    git_auth checkout "$branch" || { popd >/dev/null; return 1; }
+    git_auth pull origin "$branch" || { popd >/dev/null; return 1; }
+    popd >/dev/null
     success "[$env_name] $(basename "$repo_dir") aggiornato (branch: $branch)."
     return 0
   fi
@@ -268,6 +329,7 @@ setup_repositories() {
   mkdir -p "$env_dir"
 
   for repo_entry in "${REPOS[@]}"; do
+    check_interrupt
     repo_name="${repo_entry%%|*}"
     repo_url="${repo_entry#*|}"
     repo_dir="${env_dir}/${repo_name}"
@@ -291,7 +353,7 @@ prompt_env_file() {
   local entry key label value
 
   if [[ -f "$env_file" ]]; then
-    read -r -p "[$env_name] .env già presente. Sovrascrivere? (s/N): " confirm
+    read_line confirm -p "[$env_name] .env già presente. Sovrascrivere? (s/N): "
     case "$confirm" in
       s|S|si|Si|SI) overwrite=true ;;
       *)
@@ -311,11 +373,13 @@ prompt_env_file() {
   : > "$env_file"
 
   for entry in "${ENV_VARS[@]}"; do
+    check_interrupt
     key="${entry%%|*}"
     label="${entry#*|}"
 
     while true; do
-      read -r -p "${label}: " value
+      check_interrupt
+      read_line value -p "${label}: "
       value="$(echo "$value" | xargs)"
       if [[ -n "$value" ]]; then
         printf '%s=%s\n' "$key" "$value" >> "$env_file"
@@ -536,7 +600,7 @@ prompt_shared_env() {
   local entry key label value
 
   if [[ -f "$env_file" ]]; then
-    read -r -p ".env.shared già presente. Sovrascrivere? (s/N): " confirm
+    read_line confirm -p ".env.shared già presente. Sovrascrivere? (s/N): "
     case "$confirm" in
       s|S|si|Si|SI) ;;
       *)
@@ -553,11 +617,13 @@ prompt_shared_env() {
   : > "$env_file"
 
   for entry in "${SHARED_ENV_VARS[@]}"; do
+    check_interrupt
     key="${entry%%|*}"
     label="${entry#*|}"
 
     while true; do
-      read -r -p "${label}: " value
+      check_interrupt
+      read_line value -p "${label}: "
       value="$(echo "$value" | xargs)"
       if [[ -n "$value" ]]; then
         printf '%s=%s\n' "$key" "$value" >> "$env_file"
@@ -586,6 +652,7 @@ generate_caddyfile() {
 EOF
 
   for env in "${DISCOVERED_ENVS[@]}"; do
+    check_interrupt
     env_file="${BASE_DIR}/${env}/.env"
     domain_website="$(read_env_var "$env_file" DOMAIN_WEBSITE)"
     domain_admin="$(read_env_var "$env_file" DOMAIN_ADMIN)"
@@ -628,6 +695,7 @@ generate_postgres_init() {
 EOF
 
   for env in "${DISCOVERED_ENVS[@]}"; do
+    check_interrupt
     env_file="${BASE_DIR}/${env}/.env"
     db_user="$(read_env_var "$env_file" DB_USER)"
     db_password="$(read_env_var "$env_file" DB_PASSWORD)"
@@ -693,8 +761,9 @@ restart_app_containers() {
   local env
 
   for env in "${DISCOVERED_ENVS[@]}"; do
+    check_interrupt
     info "[$env] Riavvio be-admin e n8n per applicare credenziali DB..."
-    if (cd "${BASE_DIR}/${env}" && docker compose up -d be-admin n8n); then
+    if run_docker_compose "${BASE_DIR}/${env}" up -d be-admin n8n; then
       success "[$env] be-admin e n8n riavviati."
     else
       warn "[$env] Riavvio be-admin/n8n fallito."
@@ -750,6 +819,7 @@ setup_shared() {
   fi
 
   for env in "${DISCOVERED_ENVS[@]}"; do
+    check_interrupt
     ensure_db_credentials "$env" "${BASE_DIR}/${env}" || return 1
     ensure_n8n_credentials "$env" "${BASE_DIR}/${env}" || return 1
     ensure_temporal_client_config "$env" "${BASE_DIR}/${env}" || return 1
@@ -760,7 +830,7 @@ setup_shared() {
   generate_shared_compose
 
   info "Avvio stack condiviso..."
-  if (cd "$BASE_DIR" && docker compose --env-file .env.shared -f "$shared_compose" up -d); then
+  if run_docker_compose "$BASE_DIR" --env-file .env.shared -f "$shared_compose" up -d; then
     success "Stack condiviso avviato."
     restart_app_containers
     return 0
@@ -788,7 +858,7 @@ setup_compose() {
   ensure_n8n_credentials "$env_name" "$env_dir"
 
   info "[$env_name] Avvio container..."
-  if (cd "$env_dir" && docker compose up -d); then
+  if run_docker_compose "$env_dir" up -d; then
     success "[$env_name] Container avviati."
     return 0
   fi
@@ -803,6 +873,7 @@ init_environment() {
   local branch
   local env_ok=true
 
+  check_interrupt
   branch="$(branch_for_env "$env_name")"
 
   echo
@@ -864,16 +935,24 @@ main() {
   echo "========================================"
   echo " Asso-P2B — Inizializzazione VPS"
   echo "========================================"
+  info "Interrompi in qualsiasi momento con Ctrl+C."
 
   check_prerequisites
   setup_github_auth
   prompt_environments
 
   for env in "${SELECTED_ENVS[@]}"; do
-    init_environment "$env" || true
+    check_interrupt
+    init_environment "$env" || {
+      [[ "$SCRIPT_INTERRUPTED" == true ]] && exit 130
+      true
+    }
   done
 
-  setup_shared || true
+  setup_shared || {
+    [[ "$SCRIPT_INTERRUPTED" == true ]] && exit 130
+    true
+  }
 
   print_summary
 
