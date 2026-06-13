@@ -28,16 +28,81 @@ __CADDY_NETWORKS__
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     networks:
 __POSTGRES_NETWORKS__
+      - assop2b-internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  elasticsearch:
+    container_name: assop2b-elasticsearch
+    image: elasticsearch:7.17.27
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: -Xms256m -Xmx256m
+      xpack.security.enabled: "false"
+      cluster.routing.allocation.disk.threshold_enabled: "true"
+      cluster.routing.allocation.disk.watermark.low: 512mb
+      cluster.routing.allocation.disk.watermark.high: 256mb
+      cluster.routing.allocation.disk.watermark.flood_stage: 128mb
+    expose:
+      - "9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - assop2b-internal
+
+  temporal:
+    container_name: assop2b-temporal
+    image: temporalio/auto-setup:1.27.2
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+    env_file:
+      - .env.shared
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: ${TEMPORAL_DB_USER}
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      DBNAME: temporal
+      SKIP_DB_CREATE: "true"
+      ENABLE_ES: "true"
+      ES_SEEDS: elasticsearch
+      ES_VERSION: v7
+    ports:
+      - "7233:7233"
+    networks:
+__TEMPORAL_NETWORKS__
+      - assop2b-internal
+
+  temporal-ui:
+    container_name: assop2b-temporal-ui
+    image: temporalio/ui:2.37.2
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8080
+    ports:
+      - "8080:8080"
+    networks:
+      - assop2b-internal
+
 volumes:
   caddy_data:
   caddy_config:
   postgres_data:
+  elasticsearch_data:
 
 networks:
+  assop2b-internal:
+    name: assop2b-internal
 __EXTERNAL_NETWORKS__

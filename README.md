@@ -28,14 +28,14 @@ Lo script guida l'operatore attraverso:
 3. Clone/aggiornamento dei repository per ogni environment
 4. Prompt interattivo per i domini di ogni environment
 5. Generazione automatica delle credenziali database
-6. Avvio dello stack condiviso (Caddy + PostgreSQL)
+6. Avvio dello stack condiviso (Caddy + PostgreSQL + Temporal + Elasticsearch)
 
 ## Architettura
 
 Il deploy si articola su due livelli:
 
 - **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin`, `be-admin` e `n8n` su rete Docker isolata `assop2b-{env}`
-- **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS) e PostgreSQL (un container, database e utente dedicati per environment e per n8n)
+- **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS), PostgreSQL, Elasticsearch, Temporal Server e Temporal Web UI
 
 ```mermaid
 flowchart TB
@@ -44,6 +44,10 @@ flowchart TB
   subgraph shared [StackCondiviso]
     Caddy["Caddy :80/:443"]
     PG["postgres :5432"]
+    ES["elasticsearch"]
+    TS["temporal :7233"]
+    TUI["temporal-ui :8080"]
+    INT["assop2b-internal"]
   end
 
   subgraph dev [Rete assop2b-dev]
@@ -60,6 +64,8 @@ flowchart TB
     N_st["n8n :5678"]
   end
 
+  Client["Client esterno\n(firewall IP)"] -->|"7233 / 8080"| TS
+  Client --> TUI
   Caddy --> W_dev
   Caddy --> F_dev
   Caddy --> B_dev
@@ -70,11 +76,35 @@ flowchart TB
   Caddy --> N_st
   PG --- dev
   PG --- stage
+  TS --- dev
+  TS --- stage
   B_dev --> PG
   B_st --> PG
   N_dev --> PG
   N_st --> PG
+  B_dev -->|"temporal:7233"| TS
+  B_st -->|"temporal:7233"| TS
+  N_dev -->|"temporal:7233"| TS
+  ES --> INT
+  TS --> INT
+  TUI --> INT
+  PG --> INT
+  TUI --> TS
+  TS -->|"DB temporal"| PG
+  TS -->|"visibility"| ES
 ```
+
+### Reti Docker (stack condiviso)
+
+| Servizio | Reti |
+|----------|------|
+| `postgres` | `assop2b-{env}` (tutti) + `assop2b-internal` |
+| `elasticsearch` | solo `assop2b-internal` |
+| `temporal` | `assop2b-{env}` (tutti) + `assop2b-internal` |
+| `temporal-ui` | solo `assop2b-internal` (+ porta host `8080`) |
+| `caddy` | `assop2b-{env}` (tutti) |
+
+I container applicativi su ogni environment raggiungono Temporal via hostname `temporal:7233`. Elasticsearch non è esposto su host né sulle reti environment.
 
 ### Routing Caddy
 
@@ -129,6 +159,8 @@ assop2b-configurations/
 |-----------|-------------|
 | `ACME_EMAIL` | Email Let's Encrypt (richiesta a prompt) |
 | `POSTGRES_PASSWORD` | Password superuser PostgreSQL (auto-generata) |
+| `TEMPORAL_DB_USER` | Utente PostgreSQL Temporal (`temporal`) |
+| `TEMPORAL_DB_PASSWORD` | Password database Temporal (auto-generata, non sovrascritta su re-run) |
 
 ### `{env}/.env` (per environment)
 
@@ -149,6 +181,7 @@ assop2b-configurations/
 | `N8N_DB_PASSWORD` | Password database n8n (auto-generata, non sovrascritta su re-run) |
 | `N8N_ENCRYPTION_KEY` | Chiave crittografica n8n (auto-generata, non sovrascritta su re-run) |
 | `WEBHOOK_URL` | URL webhook n8n (`https://{DOMAIN_N8N}/`, auto-generato) |
+| `TEMPORAL_ADDRESS` | Endpoint gRPC Temporal interno (`temporal:7233`, auto-generato) |
 
 Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`.
 
@@ -161,7 +194,26 @@ DB_NAME=assop2b_dev
 DB_USER=assop2b_dev
 DB_PASSWORD=<generata>
 DATABASE_URL=postgresql://assop2b_dev:<generata>@postgres:5432/assop2b_dev
+TEMPORAL_ADDRESS=temporal:7233
 ```
+
+## Temporal (stack condiviso)
+
+Temporal Server è un servizio condiviso tra tutti gli environment:
+
+- **Persistenza workflow** — database PostgreSQL `temporal` (utente `temporal`, credenziali in `.env.shared`)
+- **Visibility** — Elasticsearch (`assop2b-elasticsearch`, rete interna, heap 256 MB)
+- **Nessun routing Caddy** — Temporal non è esposto via HTTPS pubblico
+
+### Accesso a Temporal
+
+| Modalità | Endpoint | Uso |
+|----------|----------|-----|
+| Interna (Docker) | `temporal:7233` | container su `assop2b-{env}` (be-admin, worker, SDK) |
+| Esterna (host) | `<host-vps>:7233` | client/worker fuori da Docker |
+| Web UI (host) | `http://<host-vps>:8080` | interfaccia Temporal |
+
+**Sicurezza:** le porte host `7233` e `8080` sono esposte su tutte le interfacce. Limitare l'accesso via firewall VPS (es. solo IP fidati). Elasticsearch resta sulla rete interna e non è mappato su host.
 
 ## PostgreSQL condiviso
 
@@ -169,6 +221,10 @@ Un solo container PostgreSQL (`assop2b-postgres`) serve tutti gli environment. P
 
 - un database applicativo dedicato (`assop2b_dev`, `assop2b_stage`, …) con utente `assop2b_{env}`
 - un database n8n dedicato (`n8n_dev`, `n8n_stage`, …) con utente `n8n_{env}`
+
+In aggiunta, uno **shared** database Temporal:
+
+- database `temporal` con utente `temporal` (visibility su Elasticsearch, non su Postgres)
 
 Lo script SQL di inizializzazione viene generato in `postgres/init/00-environments.sql` e montato nel container al path `/docker-entrypoint-initdb.d/`.
 
@@ -193,6 +249,10 @@ GRANT ALL PRIVILEGES ON DATABASE assop2b_stage TO assop2b_stage;
 CREATE USER n8n_stage WITH PASSWORD 'password-n8n-da-env-stage';
 CREATE DATABASE n8n_stage OWNER n8n_stage;
 GRANT ALL PRIVILEGES ON DATABASE n8n_stage TO n8n_stage;
+
+CREATE USER temporal WITH PASSWORD 'password-da-env-shared';
+CREATE DATABASE temporal OWNER temporal;
+GRANT ALL PRIVILEGES ON DATABASE temporal TO temporal;
 SQL
 ```
 
@@ -204,6 +264,10 @@ SQL
 docker compose -f docker-compose.shared.yml up -d
 docker compose -f docker-compose.shared.yml logs -f caddy
 docker compose -f docker-compose.shared.yml logs -f postgres
+docker compose -f docker-compose.shared.yml logs -f elasticsearch
+docker compose -f docker-compose.shared.yml logs -f temporal
+docker compose -f docker-compose.shared.yml logs -f temporal-ui
+docker compose -f docker-compose.shared.yml up -d elasticsearch temporal temporal-ui
 docker compose -f docker-compose.shared.yml down
 ```
 
@@ -234,6 +298,12 @@ psql "postgresql://assop2b_dev:<password>@<host-vps>:5432/assop2b_dev"
 
 # Test connettività da be-admin verso postgres
 docker exec assop2b-dev-be-admin wget -qO- http://127.0.0.1:8080/
+
+# Test connettività interna verso Temporal
+docker exec assop2b-dev-be-admin sh -c 'nc -zv temporal 7233 2>&1 || true'
+
+# Health Elasticsearch (rete interna)
+docker exec assop2b-elasticsearch curl -s http://localhost:9200/_cluster/health
 ```
 
 ## File sorgente vs generati
@@ -244,7 +314,7 @@ docker exec assop2b-dev-be-admin wget -qO- http://127.0.0.1:8080/
 | `docker-compose-model.yml` | Sorgente | Template compose per environment |
 | `docker-compose-shared-model.yml` | Sorgente | Template compose stack condiviso |
 | `.env.shared` | Generato | Credenziali e config stack condiviso |
-| `docker-compose.shared.yml` | Generato | Compose stack condiviso (Caddy + PostgreSQL) |
+| `docker-compose.shared.yml` | Generato | Compose stack condiviso (Caddy + PostgreSQL + Temporal + Elasticsearch) |
 | `caddy/Caddyfile` | Generato | Configurazione reverse proxy TLS |
 | `postgres/init/00-environments.sql` | Generato | Script init database per environment |
 | `{env}/.env` | Generato | Domini e credenziali per environment |

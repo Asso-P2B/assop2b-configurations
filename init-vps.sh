@@ -484,6 +484,40 @@ ensure_postgres_superuser_password() {
   return 0
 }
 
+ensure_temporal_credentials() {
+  local env_file="${BASE_DIR}/.env.shared"
+  local temporal_db_user="temporal"
+  local temporal_db_password
+
+  [[ -f "$env_file" ]] || return 1
+
+  temporal_db_password="$(read_env_var "$env_file" TEMPORAL_DB_PASSWORD)"
+  if [[ -z "$temporal_db_password" ]]; then
+    temporal_db_password="$(generate_random_password)"
+  fi
+
+  upsert_env_var "$env_file" TEMPORAL_DB_USER "$temporal_db_user"
+  upsert_env_var "$env_file" TEMPORAL_DB_PASSWORD "$temporal_db_password"
+
+  success "Credenziali Temporal DB configurate in .env.shared."
+  return 0
+}
+
+ensure_temporal_client_config() {
+  local env_name="$1"
+  local env_dir="$2"
+  local env_file="${env_dir}/.env"
+
+  if [[ ! -f "$env_file" ]]; then
+    warn "[$env_name] .env assente — TEMPORAL_ADDRESS non configurato."
+    return 1
+  fi
+
+  upsert_env_var "$env_file" TEMPORAL_ADDRESS "temporal:7233"
+  success "[$env_name] TEMPORAL_ADDRESS configurato."
+  return 0
+}
+
 # --- Stack condiviso (Caddy + futuri servizi) ---
 discover_environments() {
   local env
@@ -632,6 +666,26 @@ GRANT ALL PRIVILEGES ON DATABASE ${n8n_db_name} TO ${n8n_db_user};
 EOF
   done
 
+  local shared_env_file="${BASE_DIR}/.env.shared"
+  local temporal_db_user temporal_db_password temporal_sql_password
+
+  temporal_db_user="$(read_env_var "$shared_env_file" TEMPORAL_DB_USER)"
+  temporal_db_password="$(read_env_var "$shared_env_file" TEMPORAL_DB_PASSWORD)"
+
+  if [[ -z "$temporal_db_user" || -z "$temporal_db_password" ]]; then
+    error "Credenziali Temporal DB incomplete in .env.shared."
+    return 1
+  fi
+
+  temporal_sql_password="$(sql_escape "$temporal_db_password")"
+
+  cat >> "$init_file" << EOF
+
+CREATE USER ${temporal_db_user} WITH PASSWORD '${temporal_sql_password}';
+CREATE DATABASE temporal OWNER ${temporal_db_user};
+GRANT ALL PRIVILEGES ON DATABASE temporal TO ${temporal_db_user};
+EOF
+
   success "postgres/init/00-environments.sql generato."
 }
 
@@ -654,7 +708,7 @@ generate_shared_compose() {
 
   {
     while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" == "__CADDY_NETWORKS__" || "$line" == "__POSTGRES_NETWORKS__" ]]; then
+      if [[ "$line" == "__CADDY_NETWORKS__" || "$line" == "__POSTGRES_NETWORKS__" || "$line" == "__TEMPORAL_NETWORKS__" ]]; then
         for env in "${DISCOVERED_ENVS[@]}"; do
           echo "      - assop2b-${env}"
         done
@@ -687,6 +741,7 @@ setup_shared() {
 
   prompt_shared_env
   ensure_postgres_superuser_password
+  ensure_temporal_credentials || return 1
 
   acme_email="$(read_env_var "${BASE_DIR}/.env.shared" ACME_EMAIL)"
   if [[ -z "$acme_email" ]]; then
@@ -697,6 +752,7 @@ setup_shared() {
   for env in "${DISCOVERED_ENVS[@]}"; do
     ensure_db_credentials "$env" "${BASE_DIR}/${env}" || return 1
     ensure_n8n_credentials "$env" "${BASE_DIR}/${env}" || return 1
+    ensure_temporal_client_config "$env" "${BASE_DIR}/${env}" || return 1
   done
 
   generate_caddyfile "$acme_email"
@@ -793,7 +849,9 @@ print_summary() {
   if [[ -f "${BASE_DIR}/docker-compose.shared.yml" ]]; then
     info "Stack condiviso: ${BASE_DIR}/docker-compose.shared.yml"
     info "PostgreSQL: container assop2b-postgres (database per environment in postgres/init/)"
-    warn "Gli script init PostgreSQL vengono eseguiti solo al primo avvio del volume. Per aggiungere un nuovo environment a un'istanza esistente, eseguire manualmente CREATE USER/DATABASE oppure resettare il volume postgres_data."
+    info "Temporal: assop2b-temporal (gRPC :7233 host + temporal:7233 interno), UI :8080 host, Elasticsearch interno"
+    warn "Gli script init PostgreSQL vengono eseguiti solo al primo avvio del volume. Per aggiungere un nuovo environment o Temporal a un'istanza esistente, eseguire manualmente CREATE USER/DATABASE oppure resettare il volume postgres_data."
+    warn "Temporal/UI esposti su host (7233/8080): limitare l'accesso via firewall. Elasticsearch non esposto su host."
   fi
 
   echo
