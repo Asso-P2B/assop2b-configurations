@@ -141,8 +141,11 @@ __OTEL_LGTM_NETWORKS__
 
   alloy:
     container_name: assop2b-alloy
-    image: grafana/alloy:latest
+    image: grafana/alloy:v1.8.2
     restart: unless-stopped
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /:/host:ro

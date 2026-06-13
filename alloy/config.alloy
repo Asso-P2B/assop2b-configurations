@@ -1,38 +1,47 @@
-// Host system metrics (CPU, memory, disk, network)
+// Metriche host (CPU, memoria, disco, rete)
 prometheus.exporter.unix "host" {
   set_collectors = ["cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev", "uname"]
-  
+
   filesystem {
     mount_points_exclude = "^/(sys|proc|dev|host|etc)($$|/)"
   }
-  
+
   netdev {
     device_exclude = "^(veth.*|br.*|docker.*|virbr.*|lo)$$"
   }
 }
 
-prometheus.scrape "host" {
-  targets = prometheus.exporter.unix.host.targets
-  forward_to = [prometheus.remote_write.lgtm.receiver]
-  job_name = "host"
-  scrape_interval = "10s"
-}
-
-// Docker container metrics (CPU, memory, network per container)
+// Metriche container Docker (CPU, memoria, rete per container)
 prometheus.exporter.cadvisor "dockermetrics" {
   docker_host = "unix:///var/run/docker.sock"
   storage_duration = "5m"
 }
 
-prometheus.scrape "dockermetrics" {
-  targets = prometheus.exporter.cadvisor.dockermetrics.targets
-  forward_to = [prometheus.remote_write.lgtm.receiver]
+// otel-lgtm espone OTLP su 0.0.0.0:4318; Prometheus/Mimir interni restano su 127.0.0.1
+otelcol.exporter.otlphttp "lgtm" {
+  client {
+    endpoint = "http://otel-lgtm:4318"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+otelcol.receiver.prometheus "default" {
+  output {
+    metrics = [otelcol.exporter.otlphttp.lgtm.input]
+  }
+}
+
+prometheus.scrape "host" {
+  targets = prometheus.exporter.unix.host.targets
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+  job_name = "host"
   scrape_interval = "10s"
 }
 
-// Inoltra le metriche a Mimir (Grafana OTel LGTM)
-prometheus.remote_write "lgtm" {
-  endpoint {
-    url = "http://assop2b-otel-lgtm:9009/api/v1/push"
-  }
+prometheus.scrape "dockermetrics" {
+  targets = prometheus.exporter.cadvisor.dockermetrics.targets
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+  scrape_interval = "10s"
 }

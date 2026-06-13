@@ -110,6 +110,7 @@ flowchart TB
 | `temporal` | `assop2b-{env}` (tutti) + `assop2b-internal` |
 | `temporal-ui` | solo `assop2b-internal` (+ porta host `8080`) |
 | `otel-lgtm` | `assop2b-{env}` (tutti) + `assop2b-internal` (+ porta host `3300` → Grafana `:3000`) |
+| `alloy` | solo `assop2b-internal` |
 | `caddy` | `assop2b-{env}` (tutti) |
 
 I container applicativi su ogni environment raggiungono Temporal via hostname `temporal:7233` e il collector OTLP via `otel-lgtm:4318`. Elasticsearch non è esposto su host né sulle reti environment.
@@ -226,9 +227,15 @@ Il container [`grafana/otel-lgtm`](https://hub.docker.com/r/grafana/otel-lgtm) (
 - **Grafana** — UI su porta host `3300` (mapping `3300:3000`; la `3000` host è usata da `website`)
 - **Loki** — log
 - **Tempo** — trace (**Tempo** ≠ **Temporal**, il motore workflow già presente nello stack)
-- **Prometheus/Mimir** — metriche
+- **Prometheus** — metriche (interno al container, non raggiungibile dalla rete Docker; usare OTLP `:4318`)
 
 L'immagine è pensata da Grafana Labs per **dev, demo e test**; non sostituisce una piattaforma di osservabilità di produzione.
+
+### Grafana Alloy (metriche host e Docker)
+
+Il servizio `alloy` (`assop2b-alloy`) raccoglie metriche del host e dei container Docker e le invia a otel-lgtm via **OTLP HTTP** (`http://otel-lgtm:4318`). Configurazione in [`alloy/config.alloy`](alloy/config.alloy).
+
+Non usare `prometheus.remote_write` verso `:9009`: in `grafana/otel-lgtm:0.28` non c'è Mimir esposto in rete; Prometheus e gli altri backend ascoltano solo su `127.0.0.1` dentro il container otel-lgtm.
 
 ### Accesso a otel-lgtm
 
@@ -256,7 +263,13 @@ docker exec assop2b-dev-be-admin env | grep OTEL_
 
 # Connettività OTLP da be-admin
 docker exec assop2b-dev-be-admin sh -c 'nc -zv otel-lgtm 4318 2>&1 || true'
+
+# Log Alloy (export OTLP verso otel-lgtm)
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f alloy
+docker compose --env-file .env.shared -f docker-compose.shared.yml up -d otel-lgtm alloy
 ```
+
+Usare sempre `--env-file .env.shared` con lo stack condiviso, altrimenti Docker Compose avvisa che `GRAFANA_ADMIN_*` e `TEMPORAL_DB_*` non sono impostate.
 
 ## Temporal (stack condiviso)
 
