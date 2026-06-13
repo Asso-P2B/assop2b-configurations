@@ -760,7 +760,7 @@ setup_shared() {
   generate_shared_compose
 
   info "Avvio stack condiviso..."
-  if (cd "$BASE_DIR" && docker compose -f "$shared_compose" up -d); then
+  if (cd "$BASE_DIR" && docker compose --env-file .env.shared -f "$shared_compose" up -d); then
     success "Stack condiviso avviato."
     restart_app_containers
     return 0

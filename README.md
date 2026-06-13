@@ -162,6 +162,8 @@ assop2b-configurations/
 | `TEMPORAL_DB_USER` | Utente PostgreSQL Temporal (`temporal`) |
 | `TEMPORAL_DB_PASSWORD` | Password database Temporal (auto-generata, non sovrascritta su re-run) |
 
+Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le variabili `${TEMPORAL_DB_*}` nel compose vengono interpolate da quel file (non da `env_file` a runtime).
+
 ### `{env}/.env` (per environment)
 
 | Variabile | Descrizione |
@@ -261,14 +263,14 @@ SQL
 ### Stack condiviso
 
 ```bash
-docker compose -f docker-compose.shared.yml up -d
-docker compose -f docker-compose.shared.yml logs -f caddy
-docker compose -f docker-compose.shared.yml logs -f postgres
-docker compose -f docker-compose.shared.yml logs -f elasticsearch
-docker compose -f docker-compose.shared.yml logs -f temporal
-docker compose -f docker-compose.shared.yml logs -f temporal-ui
-docker compose -f docker-compose.shared.yml up -d elasticsearch temporal temporal-ui
-docker compose -f docker-compose.shared.yml down
+docker compose --env-file .env.shared -f docker-compose.shared.yml up -d
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f caddy
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f postgres
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f elasticsearch
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f temporal
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f temporal-ui
+docker compose --env-file .env.shared -f docker-compose.shared.yml up -d elasticsearch temporal temporal-ui
+docker compose --env-file .env.shared -f docker-compose.shared.yml down
 ```
 
 ### Singolo environment
