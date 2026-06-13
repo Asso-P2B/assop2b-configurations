@@ -25,6 +25,8 @@ services:
     container_name: assop2b-__ENV__-be-admin
     build:
       context: ./assop2b-be-admin
+    env_file:
+      - .env
     expose:
       - "8080"
     networks:

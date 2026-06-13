@@ -71,7 +71,7 @@ trap cleanup_credentials EXIT INT TERM
 check_prerequisites() {
   local missing=()
 
-  for cmd in git docker; do
+  for cmd in git docker openssl; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       missing+=("$cmd")
     fi
@@ -335,6 +335,98 @@ read_env_var() {
   grep -E "^${key}=" "$env_file" 2>/dev/null | cut -d= -f2- | head -1
 }
 
+generate_random_password() {
+  openssl rand -base64 24 | tr -d '\n/=+' | head -c 32
+}
+
+upsert_env_var() {
+  local env_file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp
+
+  tmp="$(mktemp)"
+  if [[ -f "$env_file" ]]; then
+    grep -vE "^${key}=" "$env_file" > "$tmp" || true
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$env_file"
+}
+
+url_encode() {
+  local value="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$value"
+    return 0
+  fi
+
+  local char encoded=""
+  local i
+  for ((i = 0; i < ${#value}; i++)); do
+    char="${value:i:1}"
+    case "$char" in
+      [a-zA-Z0-9.~_-]) encoded+="$char" ;;
+      *) encoded+=$(printf '%%%02X' "'$char") ;;
+    esac
+  done
+  printf '%s' "$encoded"
+}
+
+sql_escape() {
+  printf "%s" "$1" | sed "s/'/''/g"
+}
+
+ensure_db_credentials() {
+  local env_name="$1"
+  local env_dir="$2"
+  local env_file="${env_dir}/.env"
+  local db_user="assop2b_${env_name}"
+  local db_name="assop2b_${env_name}"
+  local db_host="postgres"
+  local db_port="5432"
+  local db_password encoded_password database_url
+
+  if [[ ! -f "$env_file" ]]; then
+    warn "[$env_name] .env assente — credenziali DB non generate."
+    return 1
+  fi
+
+  db_password="$(read_env_var "$env_file" DB_PASSWORD)"
+  if [[ -z "$db_password" ]]; then
+    db_password="$(generate_random_password)"
+  fi
+
+  encoded_password="$(url_encode "$db_password")"
+  database_url="postgresql://${db_user}:${encoded_password}@${db_host}:${db_port}/${db_name}"
+
+  upsert_env_var "$env_file" DB_HOST "$db_host"
+  upsert_env_var "$env_file" DB_PORT "$db_port"
+  upsert_env_var "$env_file" DB_NAME "$db_name"
+  upsert_env_var "$env_file" DB_USER "$db_user"
+  upsert_env_var "$env_file" DB_PASSWORD "$db_password"
+  upsert_env_var "$env_file" DATABASE_URL "$database_url"
+
+  success "[$env_name] Credenziali DB configurate."
+  return 0
+}
+
+ensure_postgres_superuser_password() {
+  local env_file="${BASE_DIR}/.env.shared"
+  local postgres_password
+
+  [[ -f "$env_file" ]] || return 1
+
+  postgres_password="$(read_env_var "$env_file" POSTGRES_PASSWORD)"
+  if [[ -n "$postgres_password" ]]; then
+    return 0
+  fi
+
+  postgres_password="$(generate_random_password)"
+  upsert_env_var "$env_file" POSTGRES_PASSWORD "$postgres_password"
+  success "POSTGRES_PASSWORD generata in .env.shared."
+  return 0
+}
+
 # --- Stack condiviso (Caddy + futuri servizi) ---
 discover_environments() {
   local env
@@ -384,6 +476,8 @@ prompt_shared_env() {
     done
   done
 
+  printf 'POSTGRES_PASSWORD=%s\n' "$(generate_random_password)" >> "$env_file"
+
   success ".env.shared creato."
 }
 
@@ -425,13 +519,61 @@ EOF
   success "caddy/Caddyfile generato."
 }
 
+generate_postgres_init() {
+  local init_dir="${BASE_DIR}/postgres/init"
+  local init_file="${init_dir}/00-environments.sql"
+  local env env_file db_user db_password db_name sql_password
+
+  mkdir -p "$init_dir"
+
+  cat > "$init_file" << 'EOF'
+-- Generato da init-vps.sh — eseguito solo al primo avvio del volume PostgreSQL
+EOF
+
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    env_file="${BASE_DIR}/${env}/.env"
+    db_user="$(read_env_var "$env_file" DB_USER)"
+    db_password="$(read_env_var "$env_file" DB_PASSWORD)"
+    db_name="$(read_env_var "$env_file" DB_NAME)"
+
+    if [[ -z "$db_user" || -z "$db_password" || -z "$db_name" ]]; then
+      error "Credenziali DB incomplete per environment '$env'."
+      return 1
+    fi
+
+    sql_password="$(sql_escape "$db_password")"
+
+    cat >> "$init_file" << EOF
+
+CREATE USER ${db_user} WITH PASSWORD '${sql_password}';
+CREATE DATABASE ${db_name} OWNER ${db_user};
+GRANT ALL PRIVILEGES ON DATABASE ${db_name} TO ${db_user};
+EOF
+  done
+
+  success "postgres/init/00-environments.sql generato."
+}
+
+restart_be_admin_containers() {
+  local env
+
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    info "[$env] Riavvio be-admin per applicare credenziali DB..."
+    if (cd "${BASE_DIR}/${env}" && docker compose up -d be-admin); then
+      success "[$env] be-admin riavviato."
+    else
+      warn "[$env] Riavvio be-admin fallito."
+    fi
+  done
+}
+
 generate_shared_compose() {
   local compose_file="${BASE_DIR}/docker-compose.shared.yml"
   local env line
 
   {
     while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" == "__CADDY_NETWORKS__" ]]; then
+      if [[ "$line" == "__CADDY_NETWORKS__" || "$line" == "__POSTGRES_NETWORKS__" ]]; then
         for env in "${DISCOVERED_ENVS[@]}"; do
           echo "      - assop2b-${env}"
         done
@@ -460,9 +602,10 @@ setup_shared() {
     return 1
   fi
 
-  info "Environment rilevati per Caddy: ${DISCOVERED_ENVS[*]}"
+  info "Environment rilevati per stack condiviso: ${DISCOVERED_ENVS[*]}"
 
   prompt_shared_env
+  ensure_postgres_superuser_password
 
   acme_email="$(read_env_var "${BASE_DIR}/.env.shared" ACME_EMAIL)"
   if [[ -z "$acme_email" ]]; then
@@ -470,12 +613,18 @@ setup_shared() {
     return 1
   fi
 
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    ensure_db_credentials "$env" "${BASE_DIR}/${env}" || return 1
+  done
+
   generate_caddyfile "$acme_email"
+  generate_postgres_init || return 1
   generate_shared_compose
 
   info "Avvio stack condiviso..."
   if (cd "$BASE_DIR" && docker compose -f "$shared_compose" up -d); then
     success "Stack condiviso avviato."
+    restart_be_admin_containers
     return 0
   fi
 
@@ -497,6 +646,7 @@ setup_compose() {
   info "[$env_name] docker-compose.yml generato."
 
   prompt_env_file "$env_name" "$env_dir"
+  ensure_db_credentials "$env_name" "$env_dir"
 
   info "[$env_name] Avvio container..."
   if (cd "$env_dir" && docker compose up -d); then
@@ -559,6 +709,8 @@ print_summary() {
   echo
   if [[ -f "${BASE_DIR}/docker-compose.shared.yml" ]]; then
     info "Stack condiviso: ${BASE_DIR}/docker-compose.shared.yml"
+    info "PostgreSQL: container assop2b-postgres (database per environment in postgres/init/)"
+    warn "Gli script init PostgreSQL vengono eseguiti solo al primo avvio del volume. Per aggiungere un nuovo environment a un'istanza esistente, eseguire manualmente CREATE USER/DATABASE oppure resettare il volume postgres_data."
   fi
 
   echo

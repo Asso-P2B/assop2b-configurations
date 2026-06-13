@@ -15,9 +15,29 @@ services:
     networks:
 __CADDY_NETWORKS__
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: assop2b-postgres
+    restart: unless-stopped
+    env_file:
+      - .env.shared
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+__POSTGRES_NETWORKS__
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   caddy_data:
   caddy_config:
+  postgres_data:
 
 networks:
 __EXTERNAL_NETWORKS__
