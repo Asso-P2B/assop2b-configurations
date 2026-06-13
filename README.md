@@ -159,6 +159,10 @@ Un solo container PostgreSQL (`assop2b-postgres`) serve tutti gli environment. P
 
 Lo script SQL di inizializzazione viene generato in `postgres/init/00-environments.sql` e montato nel container al path `/docker-entrypoint-initdb.d/`.
 
+La porta `5432` è esposta sull'host (`5432:5432`), raggiungibile da qualsiasi interfaccia di rete. I container applicativi continuano a connettersi internamente via hostname `postgres`. Per l'accesso dall'esterno usare le credenziali dell'environment (`assop2b_{env}`), non il superuser `postgres`.
+
+**Sicurezza:** con la porta esposta, limitare l'accesso tramite firewall VPS (es. consentire solo IP fidati) per ridurre il rischio di accessi non autorizzati.
+
 ### Limitazione: primo avvio del volume
 
 Gli script in `/docker-entrypoint-initdb.d/` vengono eseguiti **solo al primo avvio** del volume Docker `postgres_data`. Se si aggiunge un nuovo environment a un'istanza PostgreSQL già in esecuzione, occorre:
@@ -205,6 +209,9 @@ docker exec assop2b-postgres psql -U postgres -c '\l'
 
 # Verifica credenziali nel container be-admin
 docker exec assop2b-dev-be-admin env | grep DB_
+
+# Connessione dall'esterno (sostituire host e password con i valori da dev/.env)
+psql "postgresql://assop2b_dev:<password>@<host-vps>:5432/assop2b_dev"
 
 # Test connettività da be-admin verso postgres
 docker exec assop2b-dev-be-admin wget -qO- http://127.0.0.1:8080/
