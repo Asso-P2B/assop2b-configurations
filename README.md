@@ -34,8 +34,8 @@ Lo script guida l'operatore attraverso:
 
 Il deploy si articola su due livelli:
 
-- **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin` e `be-admin` su rete Docker isolata `assop2b-{env}`
-- **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS) e PostgreSQL (un container, database e utente dedicati per environment)
+- **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin`, `be-admin` e `n8n` su rete Docker isolata `assop2b-{env}`
+- **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS) e PostgreSQL (un container, database e utente dedicati per environment e per n8n)
 
 ```mermaid
 flowchart TB
@@ -50,24 +50,30 @@ flowchart TB
     W_dev["website :3000"]
     F_dev["fe-admin :80"]
     B_dev["be-admin :8080"]
+    N_dev["n8n :5678"]
   end
 
   subgraph stage [Rete assop2b-stage]
     W_st["website :3000"]
     F_st["fe-admin :80"]
     B_st["be-admin :8080"]
+    N_st["n8n :5678"]
   end
 
   Caddy --> W_dev
   Caddy --> F_dev
   Caddy --> B_dev
+  Caddy --> N_dev
   Caddy --> W_st
   Caddy --> F_st
   Caddy --> B_st
+  Caddy --> N_st
   PG --- dev
   PG --- stage
   B_dev --> PG
   B_st --> PG
+  N_dev --> PG
+  N_st --> PG
 ```
 
 ### Routing Caddy
@@ -79,6 +85,7 @@ Il file `caddy/Caddyfile` viene generato automaticamente da `init-vps.sh`:
 | `DOMAIN_WEBSITE` | `assop2b-{env}-website:3000` |
 | `DOMAIN_ADMIN` | `assop2b-{env}-fe-admin:80` |
 | `DOMAIN_API` | `assop2b-{env}-be-admin:8080` |
+| `DOMAIN_N8N` | `assop2b-{env}-n8n:5678` |
 
 ### Mapping branch Git
 
@@ -130,14 +137,20 @@ assop2b-configurations/
 | `DOMAIN_WEBSITE` | Dominio sito pubblico (richiesto a prompt) |
 | `DOMAIN_ADMIN` | Dominio frontend admin (richiesto a prompt) |
 | `DOMAIN_API` | Dominio API backend (richiesto a prompt) |
+| `DOMAIN_N8N` | Dominio n8n (richiesto a prompt) |
 | `DB_HOST` | Hostname del container PostgreSQL (`postgres`) |
 | `DB_PORT` | Porta PostgreSQL (`5432`) |
-| `DB_NAME` | Nome database (`assop2b_{env}`) |
-| `DB_USER` | Utente database (`assop2b_{env}`) |
+| `DB_NAME` | Nome database applicativo (`assop2b_{env}`) |
+| `DB_USER` | Utente database applicativo (`assop2b_{env}`) |
 | `DB_PASSWORD` | Password auto-generata (non sovrascritta su re-run) |
-| `DATABASE_URL` | Connection string completa |
+| `DATABASE_URL` | Connection string completa per be-admin |
+| `N8N_DB_NAME` | Database n8n (`n8n_{env}`) |
+| `N8N_DB_USER` | Utente database n8n (`n8n_{env}`) |
+| `N8N_DB_PASSWORD` | Password database n8n (auto-generata, non sovrascritta su re-run) |
+| `N8N_ENCRYPTION_KEY` | Chiave crittografica n8n (auto-generata, non sovrascritta su re-run) |
+| `WEBHOOK_URL` | URL webhook n8n (`https://{DOMAIN_N8N}/`, auto-generato) |
 
-Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml).
+Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`.
 
 Esempio per l'environment `dev`:
 
@@ -154,8 +167,8 @@ DATABASE_URL=postgresql://assop2b_dev:<generata>@postgres:5432/assop2b_dev
 
 Un solo container PostgreSQL (`assop2b-postgres`) serve tutti gli environment. Per ogni environment inizializzato vengono creati:
 
-- un database dedicato (`assop2b_dev`, `assop2b_stage`, …)
-- un utente dedicato con accesso esclusivo al proprio database
+- un database applicativo dedicato (`assop2b_dev`, `assop2b_stage`, …) con utente `assop2b_{env}`
+- un database n8n dedicato (`n8n_dev`, `n8n_stage`, …) con utente `n8n_{env}`
 
 Lo script SQL di inizializzazione viene generato in `postgres/init/00-environments.sql` e montato nel container al path `/docker-entrypoint-initdb.d/`.
 
@@ -171,11 +184,15 @@ Gli script in `/docker-entrypoint-initdb.d/` vengono eseguiti **solo al primo av
 2. **Reset del volume** — eliminare il volume `postgres_data` e riavviare lo stack condiviso (perde tutti i dati esistenti)
 
 ```bash
-# Esempio: aggiunta manuale di un database per stage
+# Esempio: aggiunta manuale di database per stage
 docker exec -it assop2b-postgres psql -U postgres <<'SQL'
 CREATE USER assop2b_stage WITH PASSWORD 'password-da-env-stage';
 CREATE DATABASE assop2b_stage OWNER assop2b_stage;
 GRANT ALL PRIVILEGES ON DATABASE assop2b_stage TO assop2b_stage;
+
+CREATE USER n8n_stage WITH PASSWORD 'password-n8n-da-env-stage';
+CREATE DATABASE n8n_stage OWNER n8n_stage;
+GRANT ALL PRIVILEGES ON DATABASE n8n_stage TO n8n_stage;
 SQL
 ```
 
@@ -198,7 +215,9 @@ docker compose up -d
 docker compose build website && docker compose up -d website
 docker compose build fe-admin && docker compose up -d fe-admin
 docker compose build be-admin && docker compose up -d be-admin
+docker compose pull n8n && docker compose up -d n8n
 docker compose logs -f be-admin
+docker compose logs -f n8n
 ```
 
 ### Verifica database

@@ -12,6 +12,7 @@ ENV_VARS=(
   "DOMAIN_WEBSITE|Dominio sito pubblico"
   "DOMAIN_ADMIN|Dominio frontend admin"
   "DOMAIN_API|Dominio API backend"
+  "DOMAIN_N8N|Dominio n8n (automazione workflow)"
 )
 
 SHARED_ENV_VARS=(
@@ -410,6 +411,62 @@ ensure_db_credentials() {
   return 0
 }
 
+ensure_n8n_credentials() {
+  local env_name="$1"
+  local env_dir="$2"
+  local env_file="${env_dir}/.env"
+  local n8n_db_user="n8n_${env_name}"
+  local n8n_db_name="n8n_${env_name}"
+  local n8n_db_host="postgres"
+  local n8n_db_port="5432"
+  local n8n_db_password encryption_key domain_n8n webhook_url
+
+  if [[ ! -f "$env_file" ]]; then
+    warn "[$env_name] .env assente — credenziali n8n non generate."
+    return 1
+  fi
+
+  domain_n8n="$(read_env_var "$env_file" DOMAIN_N8N)"
+  if [[ -z "$domain_n8n" ]]; then
+    warn "[$env_name] DOMAIN_N8N mancante — credenziali n8n non generate."
+    return 1
+  fi
+
+  n8n_db_password="$(read_env_var "$env_file" N8N_DB_PASSWORD)"
+  if [[ -z "$n8n_db_password" ]]; then
+    n8n_db_password="$(generate_random_password)"
+  fi
+
+  encryption_key="$(read_env_var "$env_file" N8N_ENCRYPTION_KEY)"
+  if [[ -z "$encryption_key" ]]; then
+    encryption_key="$(openssl rand -hex 32)"
+  fi
+
+  webhook_url="https://${domain_n8n}/"
+
+  upsert_env_var "$env_file" N8N_DB_HOST "$n8n_db_host"
+  upsert_env_var "$env_file" N8N_DB_PORT "$n8n_db_port"
+  upsert_env_var "$env_file" N8N_DB_NAME "$n8n_db_name"
+  upsert_env_var "$env_file" N8N_DB_USER "$n8n_db_user"
+  upsert_env_var "$env_file" N8N_DB_PASSWORD "$n8n_db_password"
+  upsert_env_var "$env_file" DB_TYPE "postgresdb"
+  upsert_env_var "$env_file" DB_POSTGRESDB_HOST "$n8n_db_host"
+  upsert_env_var "$env_file" DB_POSTGRESDB_PORT "$n8n_db_port"
+  upsert_env_var "$env_file" DB_POSTGRESDB_DATABASE "$n8n_db_name"
+  upsert_env_var "$env_file" DB_POSTGRESDB_USER "$n8n_db_user"
+  upsert_env_var "$env_file" DB_POSTGRESDB_PASSWORD "$n8n_db_password"
+  upsert_env_var "$env_file" N8N_ENCRYPTION_KEY "$encryption_key"
+  upsert_env_var "$env_file" N8N_HOST "$domain_n8n"
+  upsert_env_var "$env_file" N8N_PROTOCOL "https"
+  upsert_env_var "$env_file" N8N_PORT "5678"
+  upsert_env_var "$env_file" WEBHOOK_URL "$webhook_url"
+  upsert_env_var "$env_file" N8N_PROXY_HOPS "1"
+  upsert_env_var "$env_file" GENERIC_TIMEZONE "Europe/Rome"
+
+  success "[$env_name] Credenziali n8n configurate."
+  return 0
+}
+
 ensure_postgres_superuser_password() {
   local env_file="${BASE_DIR}/.env.shared"
   local postgres_password
@@ -484,7 +541,7 @@ prompt_shared_env() {
 generate_caddyfile() {
   local acme_email="$1"
   local caddyfile="${BASE_DIR}/caddy/Caddyfile"
-  local env env_file domain_website domain_admin domain_api
+  local env env_file domain_website domain_admin domain_api domain_n8n
 
   mkdir -p "${BASE_DIR}/caddy"
 
@@ -499,6 +556,7 @@ EOF
     domain_website="$(read_env_var "$env_file" DOMAIN_WEBSITE)"
     domain_admin="$(read_env_var "$env_file" DOMAIN_ADMIN)"
     domain_api="$(read_env_var "$env_file" DOMAIN_API)"
+    domain_n8n="$(read_env_var "$env_file" DOMAIN_N8N)"
 
     cat >> "$caddyfile" << EOF
 
@@ -513,6 +571,10 @@ ${domain_admin} {
 ${domain_api} {
 	reverse_proxy assop2b-${env}-be-admin:8080
 }
+
+${domain_n8n} {
+	reverse_proxy assop2b-${env}-n8n:5678
+}
 EOF
   done
 
@@ -523,6 +585,7 @@ generate_postgres_init() {
   local init_dir="${BASE_DIR}/postgres/init"
   local init_file="${init_dir}/00-environments.sql"
   local env env_file db_user db_password db_name sql_password
+  local n8n_db_user n8n_db_password n8n_db_name n8n_sql_password
 
   mkdir -p "$init_dir"
 
@@ -549,20 +612,38 @@ CREATE USER ${db_user} WITH PASSWORD '${sql_password}';
 CREATE DATABASE ${db_name} OWNER ${db_user};
 GRANT ALL PRIVILEGES ON DATABASE ${db_name} TO ${db_user};
 EOF
+
+    n8n_db_user="$(read_env_var "$env_file" N8N_DB_USER)"
+    n8n_db_password="$(read_env_var "$env_file" N8N_DB_PASSWORD)"
+    n8n_db_name="$(read_env_var "$env_file" N8N_DB_NAME)"
+
+    if [[ -z "$n8n_db_user" || -z "$n8n_db_password" || -z "$n8n_db_name" ]]; then
+      error "Credenziali n8n DB incomplete per environment '$env'."
+      return 1
+    fi
+
+    n8n_sql_password="$(sql_escape "$n8n_db_password")"
+
+    cat >> "$init_file" << EOF
+
+CREATE USER ${n8n_db_user} WITH PASSWORD '${n8n_sql_password}';
+CREATE DATABASE ${n8n_db_name} OWNER ${n8n_db_user};
+GRANT ALL PRIVILEGES ON DATABASE ${n8n_db_name} TO ${n8n_db_user};
+EOF
   done
 
   success "postgres/init/00-environments.sql generato."
 }
 
-restart_be_admin_containers() {
+restart_app_containers() {
   local env
 
   for env in "${DISCOVERED_ENVS[@]}"; do
-    info "[$env] Riavvio be-admin per applicare credenziali DB..."
-    if (cd "${BASE_DIR}/${env}" && docker compose up -d be-admin); then
-      success "[$env] be-admin riavviato."
+    info "[$env] Riavvio be-admin e n8n per applicare credenziali DB..."
+    if (cd "${BASE_DIR}/${env}" && docker compose up -d be-admin n8n); then
+      success "[$env] be-admin e n8n riavviati."
     else
-      warn "[$env] Riavvio be-admin fallito."
+      warn "[$env] Riavvio be-admin/n8n fallito."
     fi
   done
 }
@@ -615,6 +696,7 @@ setup_shared() {
 
   for env in "${DISCOVERED_ENVS[@]}"; do
     ensure_db_credentials "$env" "${BASE_DIR}/${env}" || return 1
+    ensure_n8n_credentials "$env" "${BASE_DIR}/${env}" || return 1
   done
 
   generate_caddyfile "$acme_email"
@@ -624,7 +706,7 @@ setup_shared() {
   info "Avvio stack condiviso..."
   if (cd "$BASE_DIR" && docker compose -f "$shared_compose" up -d); then
     success "Stack condiviso avviato."
-    restart_be_admin_containers
+    restart_app_containers
     return 0
   fi
 
@@ -647,6 +729,7 @@ setup_compose() {
 
   prompt_env_file "$env_name" "$env_dir"
   ensure_db_credentials "$env_name" "$env_dir"
+  ensure_n8n_credentials "$env_name" "$env_dir"
 
   info "[$env_name] Avvio container..."
   if (cd "$env_dir" && docker compose up -d); then

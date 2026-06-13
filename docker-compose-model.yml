@@ -32,6 +32,22 @@ services:
     networks:
       - assop2b-__ENV__
 
+  n8n:
+    container_name: assop2b-__ENV__-n8n
+    image: docker.n8n.io/n8nio/n8n
+    restart: unless-stopped
+    env_file:
+      - .env
+    expose:
+      - "5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - assop2b-__ENV__
+
+volumes:
+  n8n_data:
+
 networks:
   assop2b-__ENV__:
     name: assop2b-__ENV__
