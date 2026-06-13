@@ -53,6 +53,12 @@ __POSTGRES_NETWORKS__
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
       - assop2b-internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -E -q '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
 
   temporal:
     container_name: assop2b-temporal
@@ -62,7 +68,7 @@ __POSTGRES_NETWORKS__
       postgres:
         condition: service_healthy
       elasticsearch:
-        condition: service_started
+        condition: service_healthy
     env_file:
       - .env.shared
     environment:
@@ -76,18 +82,28 @@ __POSTGRES_NETWORKS__
       ENABLE_ES: "true"
       ES_SEEDS: elasticsearch
       ES_VERSION: v7
+      BIND_ON_IP: "0.0.0.0"
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CLI_ADDRESS: temporal:7233
     ports:
       - "7233:7233"
     networks:
 __TEMPORAL_NETWORKS__
       - assop2b-internal
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 7233 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
 
   temporal-ui:
     container_name: assop2b-temporal-ui
     image: temporalio/ui:2.37.2
     restart: unless-stopped
     depends_on:
-      - temporal
+      temporal:
+        condition: service_healthy
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_CORS_ORIGINS: http://localhost:8080

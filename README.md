@@ -217,6 +217,21 @@ Temporal Server è un servizio condiviso tra tutti gli environment:
 
 **Sicurezza:** le porte host `7233` e `8080` sono esposte su tutte le interfacce. Limitare l'accesso via firewall VPS (es. solo IP fidati). Elasticsearch resta sulla rete interna e non è mappato su host.
 
+Temporal è collegato a più reti Docker (`assop2b-{env}` + `assop2b-internal`); nel compose è impostato `BIND_ON_IP=0.0.0.0` affinché gRPC sia raggiungibile da UI e container applicativi su reti diverse.
+
+### Troubleshooting Temporal
+
+```bash
+# Verifica che Temporal ascolti su tutte le interfacce (non solo su un IP di rete)
+docker exec assop2b-temporal netstat -ln | grep 7233
+
+# Health gRPC da UI / rete interna
+docker exec assop2b-temporal-ui wget -qO- http://localhost:8080/api/v1/namespaces 2>&1 | head -5
+
+# Log setup (schema Postgres / indici ES)
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f temporal
+```
+
 ## PostgreSQL condiviso
 
 Un solo container PostgreSQL (`assop2b-postgres`) serve tutti gli environment. Per ogni environment inizializzato vengono creati:
