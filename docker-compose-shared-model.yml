@@ -85,6 +85,7 @@ __POSTGRES_NETWORKS__
       BIND_ON_IP: "0.0.0.0"
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_CLI_ADDRESS: temporal:7233
+      SKIP_DEFAULT_NAMESPACE_CREATION: "true"
     ports:
       - "7233:7233"
     networks:

@@ -562,6 +562,7 @@ ensure_temporal_credentials() {
 
   upsert_env_var "$env_file" TEMPORAL_DB_USER "$temporal_db_user"
   upsert_env_var "$env_file" TEMPORAL_DB_PASSWORD "$temporal_db_password"
+  upsert_env_var "$env_file" TEMPORAL_NAMESPACE_RETENTION "720h"
 
   success "Credenziali Temporal DB configurate in .env.shared."
   return 0
@@ -578,7 +579,66 @@ ensure_temporal_client_config() {
   fi
 
   upsert_env_var "$env_file" TEMPORAL_ADDRESS "temporal:7233"
-  success "[$env_name] TEMPORAL_ADDRESS configurato."
+  upsert_env_var "$env_file" TEMPORAL_NAMESPACE "$env_name"
+  success "[$env_name] TEMPORAL_ADDRESS e TEMPORAL_NAMESPACE configurati."
+  return 0
+}
+
+wait_for_temporal_cluster() {
+  local attempt max_attempts=120
+  local health_output
+
+  info "Attesa avvio cluster Temporal..."
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    check_interrupt
+    if health_output="$(docker exec assop2b-temporal temporal operator cluster health --address temporal:7233 2>&1)" \
+      && grep -q SERVING <<< "$health_output"; then
+      success "Cluster Temporal in stato SERVING."
+      return 0
+    fi
+    sleep 1
+  done
+
+  error "Timeout in attesa del cluster Temporal."
+  return 1
+}
+
+ensure_temporal_namespaces() {
+  local env retention
+
+  retention="$(read_env_var "${BASE_DIR}/.env.shared" TEMPORAL_NAMESPACE_RETENTION)"
+  if [[ -z "$retention" ]]; then
+    retention="720h"
+  fi
+
+  if ! docker ps --format '{{.Names}}' | grep -qx 'assop2b-temporal'; then
+    error "Container assop2b-temporal non in esecuzione — namespace Temporal non creati."
+    return 1
+  fi
+
+  wait_for_temporal_cluster || return 1
+
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    check_interrupt
+    if docker exec assop2b-temporal temporal operator namespace describe \
+      --namespace "$env" --address temporal:7233 >/dev/null 2>&1; then
+      info "Namespace Temporal '$env' già registrato."
+      continue
+    fi
+
+    info "Registrazione namespace Temporal '$env' (retention: ${retention})..."
+    if docker exec assop2b-temporal temporal operator namespace create \
+      --namespace "$env" \
+      --retention "$retention" \
+      --description "Asso-P2B ${env}" \
+      --address temporal:7233; then
+      success "Namespace Temporal '$env' registrato."
+    else
+      error "Registrazione namespace Temporal '$env' fallita."
+      return 1
+    fi
+  done
+
   return 0
 }
 
@@ -832,6 +892,7 @@ setup_shared() {
   info "Avvio stack condiviso..."
   if run_docker_compose "$BASE_DIR" --env-file .env.shared -f "$shared_compose" up -d; then
     success "Stack condiviso avviato."
+    ensure_temporal_namespaces || return 1
     restart_app_containers
     return 0
   fi

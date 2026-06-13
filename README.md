@@ -161,6 +161,7 @@ assop2b-configurations/
 | `POSTGRES_PASSWORD` | Password superuser PostgreSQL (auto-generata) |
 | `TEMPORAL_DB_USER` | Utente PostgreSQL Temporal (`temporal`) |
 | `TEMPORAL_DB_PASSWORD` | Password database Temporal (auto-generata, non sovrascritta su re-run) |
+| `TEMPORAL_NAMESPACE_RETENTION` | Retention dei namespace Temporal (`720h`, auto-generata) |
 
 Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le variabili `${TEMPORAL_DB_*}` nel compose vengono interpolate da quel file (non da `env_file` a runtime).
 
@@ -184,6 +185,7 @@ Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le 
 | `N8N_ENCRYPTION_KEY` | Chiave crittografica n8n (auto-generata, non sovrascritta su re-run) |
 | `WEBHOOK_URL` | URL webhook n8n (`https://{DOMAIN_N8N}/`, auto-generato) |
 | `TEMPORAL_ADDRESS` | Endpoint gRPC Temporal interno (`temporal:7233`, auto-generato) |
+| `TEMPORAL_NAMESPACE` | Namespace Temporal dell'environment (`dev`, `stage`, `prod`, auto-generato) |
 
 Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`.
 
@@ -197,6 +199,7 @@ DB_USER=assop2b_dev
 DB_PASSWORD=<generata>
 DATABASE_URL=postgresql://assop2b_dev:<generata>@postgres:5432/assop2b_dev
 TEMPORAL_ADDRESS=temporal:7233
+TEMPORAL_NAMESPACE=dev
 ```
 
 ## Temporal (stack condiviso)
@@ -205,7 +208,32 @@ Temporal Server è un servizio condiviso tra tutti gli environment:
 
 - **Persistenza workflow** — database PostgreSQL `temporal` (utente `temporal`, credenziali in `.env.shared`)
 - **Visibility** — Elasticsearch (`assop2b-elasticsearch`, rete interna, heap 256 MB)
+- **Namespace** — uno per ogni environment inizializzato (`dev`, `stage`, `prod`), retention `720h`
 - **Nessun routing Caddy** — Temporal non è esposto via HTTPS pubblico
+
+### Namespace Temporal
+
+| Environment | Namespace | Variabile in `{env}/.env` |
+|-------------|-----------|---------------------------|
+| `dev` | `dev` | `TEMPORAL_NAMESPACE=dev` |
+| `stage` | `stage` | `TEMPORAL_NAMESPACE=stage` |
+| `prod` | `prod` | `TEMPORAL_NAMESPACE=prod` |
+
+Solo gli environment con `{env}/.env` presente ricevono un namespace (registrato da `init-vps.sh` dopo l'avvio dello stack condiviso). Il namespace `default` non viene creato (`SKIP_DEFAULT_NAMESPACE_CREATION=true`).
+
+Per aggiungere un nuovo environment a un'istanza Temporal già in esecuzione, eseguire manualmente:
+
+```bash
+docker exec assop2b-temporal temporal operator namespace create \
+  --namespace stage --retention 720h --description "Asso-P2B stage" \
+  --address temporal:7233
+```
+
+Verifica namespace registrati:
+
+```bash
+docker exec assop2b-temporal temporal operator namespace list --address temporal:7233
+```
 
 ### Accesso a Temporal
 
