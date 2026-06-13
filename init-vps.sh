@@ -584,6 +584,42 @@ ensure_temporal_client_config() {
   return 0
 }
 
+ensure_grafana_credentials() {
+  local env_file="${BASE_DIR}/.env.shared"
+  local grafana_admin_user="admin"
+  local grafana_admin_password
+
+  [[ -f "$env_file" ]] || return 1
+
+  grafana_admin_password="$(read_env_var "$env_file" GRAFANA_ADMIN_PASSWORD)"
+  if [[ -z "$grafana_admin_password" ]]; then
+    grafana_admin_password="$(generate_random_password)"
+  fi
+
+  upsert_env_var "$env_file" GRAFANA_ADMIN_USER "$grafana_admin_user"
+  upsert_env_var "$env_file" GRAFANA_ADMIN_PASSWORD "$grafana_admin_password"
+
+  success "Credenziali Grafana configurate in .env.shared."
+  return 0
+}
+
+ensure_otel_client_config() {
+  local env_name="$1"
+  local env_dir="$2"
+  local env_file="${env_dir}/.env"
+
+  if [[ ! -f "$env_file" ]]; then
+    warn "[$env_name] .env assente — variabili OTEL non configurate."
+    return 1
+  fi
+
+  upsert_env_var "$env_file" OTEL_EXPORTER_OTLP_ENDPOINT "http://otel-lgtm:4318"
+  upsert_env_var "$env_file" OTEL_EXPORTER_OTLP_PROTOCOL "http/protobuf"
+  upsert_env_var "$env_file" OTEL_SERVICE_NAME "assop2b-be-admin-${env_name}"
+  success "[$env_name] variabili OTEL configurate."
+  return 0
+}
+
 wait_for_temporal_cluster() {
   local attempt max_attempts=120
   local health_output
@@ -837,7 +873,7 @@ generate_shared_compose() {
 
   {
     while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" == "__CADDY_NETWORKS__" || "$line" == "__POSTGRES_NETWORKS__" || "$line" == "__TEMPORAL_NETWORKS__" ]]; then
+      if [[ "$line" == "__CADDY_NETWORKS__" || "$line" == "__POSTGRES_NETWORKS__" || "$line" == "__TEMPORAL_NETWORKS__" || "$line" == "__OTEL_LGTM_NETWORKS__" ]]; then
         for env in "${DISCOVERED_ENVS[@]}"; do
           echo "      - assop2b-${env}"
         done
@@ -871,6 +907,7 @@ setup_shared() {
   prompt_shared_env
   ensure_postgres_superuser_password
   ensure_temporal_credentials || return 1
+  ensure_grafana_credentials || return 1
 
   acme_email="$(read_env_var "${BASE_DIR}/.env.shared" ACME_EMAIL)"
   if [[ -z "$acme_email" ]]; then
@@ -883,6 +920,7 @@ setup_shared() {
     ensure_db_credentials "$env" "${BASE_DIR}/${env}" || return 1
     ensure_n8n_credentials "$env" "${BASE_DIR}/${env}" || return 1
     ensure_temporal_client_config "$env" "${BASE_DIR}/${env}" || return 1
+    ensure_otel_client_config "$env" "${BASE_DIR}/${env}" || return 1
   done
 
   generate_caddyfile "$acme_email"
@@ -982,8 +1020,12 @@ print_summary() {
     info "Stack condiviso: ${BASE_DIR}/docker-compose.shared.yml"
     info "PostgreSQL: container assop2b-postgres (database per environment in postgres/init/)"
     info "Temporal: assop2b-temporal (gRPC :7233 host + temporal:7233 interno), UI :8080 host, Elasticsearch interno"
+    info "otel-lgtm: assop2b-otel-lgtm (Grafana UI :3300 host → :3000 container, OTLP interno otel-lgtm:4318)"
     warn "Gli script init PostgreSQL vengono eseguiti solo al primo avvio del volume. Per aggiungere un nuovo environment o Temporal a un'istanza esistente, eseguire manualmente CREATE USER/DATABASE oppure resettare il volume postgres_data."
     warn "Temporal/UI esposti su host (7233/8080): limitare l'accesso via firewall. Elasticsearch non esposto su host."
+    warn "Grafana otel-lgtm esposta su host :3300: limitare l'accesso via firewall. Credenziali in .env.shared (GRAFANA_ADMIN_*)."
+    warn "otel-lgtm è pensato per dev/demo (Grafana Labs). Tempo (trace LGTM) ≠ Temporal (workflow)."
+    warn "Senza SDK OpenTelemetry nelle app non compariranno metriche/trace/log in Grafana; le variabili OTEL_* sono già nei .env per-env."
   fi
 
   echo

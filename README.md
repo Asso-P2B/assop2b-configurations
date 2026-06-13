@@ -28,14 +28,14 @@ Lo script guida l'operatore attraverso:
 3. Clone/aggiornamento dei repository per ogni environment
 4. Prompt interattivo per i domini di ogni environment
 5. Generazione automatica delle credenziali database
-6. Avvio dello stack condiviso (Caddy + PostgreSQL + Temporal + Elasticsearch)
+6. Avvio dello stack condiviso (Caddy + PostgreSQL + Temporal + Elasticsearch + otel-lgtm)
 
 ## Architettura
 
 Il deploy si articola su due livelli:
 
 - **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin`, `be-admin` e `n8n` su rete Docker isolata `assop2b-{env}`
-- **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS), PostgreSQL, Elasticsearch, Temporal Server e Temporal Web UI
+- **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS), PostgreSQL, Elasticsearch, Temporal Server, Temporal Web UI e otel-lgtm (OpenTelemetry + Grafana)
 
 ```mermaid
 flowchart TB
@@ -47,6 +47,7 @@ flowchart TB
     ES["elasticsearch"]
     TS["temporal :7233"]
     TUI["temporal-ui :8080"]
+    OL["otel-lgtm :3300 / :4318"]
     INT["assop2b-internal"]
   end
 
@@ -66,6 +67,7 @@ flowchart TB
 
   Client["Client esterno\n(firewall IP)"] -->|"7233 / 8080"| TS
   Client --> TUI
+  Client -->|"3300 Grafana"| OL
   Caddy --> W_dev
   Caddy --> F_dev
   Caddy --> B_dev
@@ -85,10 +87,15 @@ flowchart TB
   B_dev -->|"temporal:7233"| TS
   B_st -->|"temporal:7233"| TS
   N_dev -->|"temporal:7233"| TS
+  B_dev -->|"otel-lgtm:4318"| OL
+  B_st -->|"otel-lgtm:4318"| OL
   ES --> INT
   TS --> INT
   TUI --> INT
+  OL --> INT
   PG --> INT
+  OL --- dev
+  OL --- stage
   TUI --> TS
   TS -->|"DB temporal"| PG
   TS -->|"visibility"| ES
@@ -102,9 +109,10 @@ flowchart TB
 | `elasticsearch` | solo `assop2b-internal` |
 | `temporal` | `assop2b-{env}` (tutti) + `assop2b-internal` |
 | `temporal-ui` | solo `assop2b-internal` (+ porta host `8080`) |
+| `otel-lgtm` | `assop2b-{env}` (tutti) + `assop2b-internal` (+ porta host `3300` → Grafana `:3000`) |
 | `caddy` | `assop2b-{env}` (tutti) |
 
-I container applicativi su ogni environment raggiungono Temporal via hostname `temporal:7233`. Elasticsearch non è esposto su host né sulle reti environment.
+I container applicativi su ogni environment raggiungono Temporal via hostname `temporal:7233` e il collector OTLP via `otel-lgtm:4318`. Elasticsearch non è esposto su host né sulle reti environment.
 
 ### Routing Caddy
 
@@ -162,8 +170,10 @@ assop2b-configurations/
 | `TEMPORAL_DB_USER` | Utente PostgreSQL Temporal (`temporal`) |
 | `TEMPORAL_DB_PASSWORD` | Password database Temporal (auto-generata, non sovrascritta su re-run) |
 | `TEMPORAL_NAMESPACE_RETENTION` | Retention dei namespace Temporal (`720h`, auto-generata) |
+| `GRAFANA_ADMIN_USER` | Utente admin Grafana otel-lgtm (`admin`, auto-generato) |
+| `GRAFANA_ADMIN_PASSWORD` | Password admin Grafana (auto-generata, non sovrascritta su re-run) |
 
-Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le variabili `${TEMPORAL_DB_*}` nel compose vengono interpolate da quel file (non da `env_file` a runtime).
+Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le variabili `${TEMPORAL_DB_*}` e `${GRAFANA_ADMIN_*}` nel compose vengono interpolate da quel file (non da `env_file` a runtime).
 
 ### `{env}/.env` (per environment)
 
@@ -186,6 +196,9 @@ Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le 
 | `WEBHOOK_URL` | URL webhook n8n (`https://{DOMAIN_N8N}/`, auto-generato) |
 | `TEMPORAL_ADDRESS` | Endpoint gRPC Temporal interno (`temporal:7233`, auto-generato) |
 | `TEMPORAL_NAMESPACE` | Namespace Temporal dell'environment (`dev`, `stage`, `prod`, auto-generato) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP HTTP interno (`http://otel-lgtm:4318`, auto-generato) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | Protocollo OTLP (`http/protobuf`, auto-generato) |
+| `OTEL_SERVICE_NAME` | Nome servizio OpenTelemetry (`assop2b-be-admin-{env}`, auto-generato) |
 
 Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`.
 
@@ -200,6 +213,49 @@ DB_PASSWORD=<generata>
 DATABASE_URL=postgresql://assop2b_dev:<generata>@postgres:5432/assop2b_dev
 TEMPORAL_ADDRESS=temporal:7233
 TEMPORAL_NAMESPACE=dev
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-lgtm:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_SERVICE_NAME=assop2b-be-admin-dev
+```
+
+## OpenTelemetry / otel-lgtm (stack condiviso)
+
+Il container [`grafana/otel-lgtm`](https://hub.docker.com/r/grafana/otel-lgtm) (`assop2b-otel-lgtm`) fornisce un backend OpenTelemetry all-in-one per metriche, log e trace:
+
+- **OpenTelemetry Collector** — riceve segnali OTLP su `:4317` (gRPC) e `:4318` (HTTP), solo rete Docker
+- **Grafana** — UI su porta host `3300` (mapping `3300:3000`; la `3000` host è usata da `website`)
+- **Loki** — log
+- **Tempo** — trace (**Tempo** ≠ **Temporal**, il motore workflow già presente nello stack)
+- **Prometheus/Mimir** — metriche
+
+L'immagine è pensata da Grafana Labs per **dev, demo e test**; non sostituisce una piattaforma di osservabilità di produzione.
+
+### Accesso a otel-lgtm
+
+| Modalità | Endpoint | Uso |
+|----------|----------|-----|
+| Grafana UI (host) | `http://<host-vps>:3300` | dashboard (credenziali `GRAFANA_ADMIN_*` in `.env.shared`) |
+| OTLP HTTP (Docker) | `http://otel-lgtm:4318` | export da container su `assop2b-{env}` |
+| OTLP gRPC (Docker) | `otel-lgtm:4317` | export gRPC (alternativa a HTTP) |
+
+**Sicurezza:** la porta host `3300` è esposta su tutte le interfacce. Limitare l'accesso via firewall VPS (es. solo IP fidati). Le porte OTLP `4317`/`4318` non sono mappate sull'host.
+
+**Dati in Grafana:** senza SDK OpenTelemetry nelle applicazioni non compariranno metriche, trace o log. Le variabili `OTEL_*` nei `{env}/.env` sono già configurate per un passo successivo di instrumentazione (es. in `be-admin`).
+
+### Troubleshooting otel-lgtm
+
+```bash
+# Log avvio stack LGTM
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f otel-lgtm
+
+# Health Grafana (interno al container)
+docker exec assop2b-otel-lgtm wget -qO- http://127.0.0.1:3000/api/health
+
+# Variabili OTEL nel container be-admin
+docker exec assop2b-dev-be-admin env | grep OTEL_
+
+# Connettività OTLP da be-admin
+docker exec assop2b-dev-be-admin sh -c 'nc -zv otel-lgtm 4318 2>&1 || true'
 ```
 
 ## Temporal (stack condiviso)
@@ -312,7 +368,8 @@ docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f postg
 docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f elasticsearch
 docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f temporal
 docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f temporal-ui
-docker compose --env-file .env.shared -f docker-compose.shared.yml up -d elasticsearch temporal temporal-ui
+docker compose --env-file .env.shared -f docker-compose.shared.yml logs -f otel-lgtm
+docker compose --env-file .env.shared -f docker-compose.shared.yml up -d elasticsearch temporal temporal-ui otel-lgtm
 docker compose --env-file .env.shared -f docker-compose.shared.yml down
 ```
 
@@ -359,7 +416,7 @@ docker exec assop2b-elasticsearch curl -s http://localhost:9200/_cluster/health
 | `docker-compose-model.yml` | Sorgente | Template compose per environment |
 | `docker-compose-shared-model.yml` | Sorgente | Template compose stack condiviso |
 | `.env.shared` | Generato | Credenziali e config stack condiviso |
-| `docker-compose.shared.yml` | Generato | Compose stack condiviso (Caddy + PostgreSQL + Temporal + Elasticsearch) |
+| `docker-compose.shared.yml` | Generato | Compose stack condiviso (Caddy + PostgreSQL + Temporal + Elasticsearch + otel-lgtm) |
 | `caddy/Caddyfile` | Generato | Configurazione reverse proxy TLS |
 | `postgres/init/00-environments.sql` | Generato | Script init database per environment |
 | `{env}/.env` | Generato | Domini e credenziali per environment |

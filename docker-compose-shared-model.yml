@@ -113,11 +113,38 @@ __TEMPORAL_NETWORKS__
     networks:
       - assop2b-internal
 
+  otel-lgtm:
+    container_name: assop2b-otel-lgtm
+    image: grafana/otel-lgtm:0.28.0
+    restart: unless-stopped
+    env_file:
+      - .env.shared
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "3300:3000"
+    expose:
+      - "4317"
+      - "4318"
+    volumes:
+      - otel_lgtm_data:/data
+    networks:
+__OTEL_LGTM_NETWORKS__
+      - assop2b-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+
 volumes:
   caddy_data:
   caddy_config:
   postgres_data:
   elasticsearch_data:
+  otel_lgtm_data:
 
 networks:
   assop2b-internal:
