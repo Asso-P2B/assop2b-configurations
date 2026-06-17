@@ -32,7 +32,7 @@ Lo script guida l'operatore attraverso:
 
 ## Architettura
 
-Il deploy si articola su due livelli:
+Il deploy si articola su due livelli (motivazione in [ADR 0001](docs/adr/0001-confini-stack-condiviso-vs-environment.md)):
 
 - **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin`, `be-admin` e `n8n` su rete Docker isolata `assop2b-{env}`
 - **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS), PostgreSQL, Elasticsearch, Temporal Server, Temporal Web UI e otel-lgtm (OpenTelemetry + Grafana)
@@ -133,6 +133,16 @@ Il file `caddy/Caddyfile` viene generato automaticamente da `init-vps.sh`:
 | `dev` | `dev` |
 | `stage` | `stage` |
 | `prod` | `main` |
+
+## ADR
+
+Le decisioni architetturali rilevanti sono tracciate come **Architectural Decision Record** in [`docs/adr/`](docs/adr/).
+
+| ADR | Titolo | Status |
+|-----|--------|--------|
+| [0001](docs/adr/0001-confini-stack-condiviso-vs-environment.md) | Confini e responsabilità tra stack condiviso e stack per environment | Accepted |
+
+Per il contesto operativo (compose, variabili, troubleshooting) fare riferimento alle sezioni seguenti di questo README.
 
 ## Struttura directory dopo init
 
