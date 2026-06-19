@@ -141,6 +141,7 @@ Le decisioni architetturali rilevanti sono tracciate come **Architectural Decisi
 | ADR | Titolo | Status |
 |-----|--------|--------|
 | [0001](docs/adr/0001-confini-stack-condiviso-vs-environment.md) | Confini e responsabilità tra stack condiviso e stack per environment | Accepted |
+| [0002](docs/adr/0002-drizzle-orm.md) | Drizzle ORM per persistenza applicativa (assop2b-be-admin) | Accepted |
 
 Per il contesto operativo (compose, variabili, troubleshooting) fare riferimento alle sezioni seguenti di questo README.
 
@@ -210,6 +211,12 @@ Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le 
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP HTTP interno (`http://otel-lgtm:4318`, auto-generato) |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | Protocollo OTLP (`http/protobuf`, auto-generato) |
 | `OTEL_SERVICE_NAME` | Nome servizio OpenTelemetry (`assop2b-be-admin-{env}`, auto-generato) |
+| `JWT_ACCESS_SECRET` | Secret JWT access token (be-admin, generare in produzione) |
+| `JWT_REFRESH_SECRET` | Secret JWT refresh token |
+| `JWT_LOGIN_CHALLENGE_SECRET` | Secret JWT step 2FA |
+| `TOTP_ENCRYPTION_KEY` | Chiave AES per secret TOTP in DB |
+| `COOKIE_SECRET` | Firma cookie refresh |
+| `WEBSITE_CMS_API_KEY` | API key M2M con scope `cms.read` per il servizio `website` |
 
 Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`.
 

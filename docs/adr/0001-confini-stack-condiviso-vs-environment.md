@@ -111,6 +111,7 @@ flowchart LR
 
 ### Follow-up impliciti (fuori scope di questo ADR)
 
+- [ADR 0002](0002-drizzle-orm.md) documenta la scelta ORM e il workflow migrazioni in `assop2b-be-admin`.
 - Valutare hardening progressivo delle porte host esposte.
 - Definire in ADR dedicato la strategia di osservabilità per produzione (otel-lgtm è pensato per dev/demo/test).
 - Documentare runbook per aggiunta environment su istanza già provisionata.

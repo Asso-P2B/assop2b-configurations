@@ -5,6 +5,10 @@ services:
     container_name: assop2b-__ENV__-website
     build:
       context: ./assop2b-website
+    environment:
+      NUXT_API_BASE_URL: https://${DOMAIN_API}
+      NUXT_CMS_API_KEY: ${WEBSITE_CMS_API_KEY}
+      NUXT_PUBLIC_SITE_URL: https://${DOMAIN_WEBSITE}
     expose:
       - "3000"
     networks:
