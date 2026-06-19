@@ -439,6 +439,78 @@ upsert_env_var() {
   mv "$tmp" "$env_file"
 }
 
+remove_env_var() {
+  local env_file="$1"
+  local key="$2"
+  local tmp
+
+  [[ -f "$env_file" ]] || return 0
+
+  tmp="$(mktemp)"
+  grep -vE "^${key}=" "$env_file" > "$tmp" || true
+  mv "$tmp" "$env_file"
+}
+
+prune_redundant_env_vars() {
+  local env_name="$1"
+  local env_dir="$2"
+  local env_file="${env_dir}/.env"
+  local key
+  local -a redundant_keys=(
+    DB_HOST
+    DB_PORT
+    N8N_DB_HOST
+    N8N_DB_PORT
+    DB_TYPE
+    DB_POSTGRESDB_HOST
+    DB_POSTGRESDB_PORT
+    DB_POSTGRESDB_DATABASE
+    DB_POSTGRESDB_USER
+    DB_POSTGRESDB_PASSWORD
+    N8N_HOST
+    N8N_PROTOCOL
+    N8N_PORT
+    WEBHOOK_URL
+    N8N_PROXY_HOPS
+    GENERIC_TIMEZONE
+    TEMPORAL_ADDRESS
+    TEMPORAL_NAMESPACE
+    OTEL_EXPORTER_OTLP_ENDPOINT
+    OTEL_EXPORTER_OTLP_PROTOCOL
+    OTEL_SERVICE_NAME
+  )
+
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
+
+  for key in "${redundant_keys[@]}"; do
+    remove_env_var "$env_file" "$key"
+  done
+
+  success "[$env_name] Variabili ridondanti rimosse da .env."
+  return 0
+}
+
+regenerate_env_compose_files() {
+  local env compose_file
+
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    check_interrupt
+    compose_file="${BASE_DIR}/${env}/docker-compose.yml"
+    if [[ ! -f "${BASE_DIR}/${env}/.env" ]]; then
+      warn "[$env] .env assente — docker-compose.yml non rigenerato."
+      continue
+    fi
+
+    sed "s/__ENV__/${env}/g" "$COMPOSE_MODEL" > "$compose_file"
+    info "[$env] docker-compose.yml rigenerato."
+  done
+
+  success "docker-compose.yml rigenerati per tutti gli environment."
+  return 0
+}
+
 url_encode() {
   local value="$1"
   if command -v python3 >/dev/null 2>&1; then
@@ -485,8 +557,6 @@ ensure_db_credentials() {
   encoded_password="$(url_encode "$db_password")"
   database_url="postgresql://${db_user}:${encoded_password}@${db_host}:${db_port}/${db_name}"
 
-  upsert_env_var "$env_file" DB_HOST "$db_host"
-  upsert_env_var "$env_file" DB_PORT "$db_port"
   upsert_env_var "$env_file" DB_NAME "$db_name"
   upsert_env_var "$env_file" DB_USER "$db_user"
   upsert_env_var "$env_file" DB_PASSWORD "$db_password"
@@ -502,9 +572,7 @@ ensure_n8n_credentials() {
   local env_file="${env_dir}/.env"
   local n8n_db_user="n8n_${env_name}"
   local n8n_db_name="n8n_${env_name}"
-  local n8n_db_host="postgres"
-  local n8n_db_port="5432"
-  local n8n_db_password encryption_key domain_n8n webhook_url
+  local n8n_db_password encryption_key domain_n8n
 
   if [[ ! -f "$env_file" ]]; then
     warn "[$env_name] .env assente — credenziali n8n non generate."
@@ -527,26 +595,10 @@ ensure_n8n_credentials() {
     encryption_key="$(openssl rand -hex 32)"
   fi
 
-  webhook_url="https://${domain_n8n}/"
-
-  upsert_env_var "$env_file" N8N_DB_HOST "$n8n_db_host"
-  upsert_env_var "$env_file" N8N_DB_PORT "$n8n_db_port"
   upsert_env_var "$env_file" N8N_DB_NAME "$n8n_db_name"
   upsert_env_var "$env_file" N8N_DB_USER "$n8n_db_user"
   upsert_env_var "$env_file" N8N_DB_PASSWORD "$n8n_db_password"
-  upsert_env_var "$env_file" DB_TYPE "postgresdb"
-  upsert_env_var "$env_file" DB_POSTGRESDB_HOST "$n8n_db_host"
-  upsert_env_var "$env_file" DB_POSTGRESDB_PORT "$n8n_db_port"
-  upsert_env_var "$env_file" DB_POSTGRESDB_DATABASE "$n8n_db_name"
-  upsert_env_var "$env_file" DB_POSTGRESDB_USER "$n8n_db_user"
-  upsert_env_var "$env_file" DB_POSTGRESDB_PASSWORD "$n8n_db_password"
   upsert_env_var "$env_file" N8N_ENCRYPTION_KEY "$encryption_key"
-  upsert_env_var "$env_file" N8N_HOST "$domain_n8n"
-  upsert_env_var "$env_file" N8N_PROTOCOL "https"
-  upsert_env_var "$env_file" N8N_PORT "5678"
-  upsert_env_var "$env_file" WEBHOOK_URL "$webhook_url"
-  upsert_env_var "$env_file" N8N_PROXY_HOPS "1"
-  upsert_env_var "$env_file" GENERIC_TIMEZONE "Europe/Rome"
 
   success "[$env_name] Credenziali n8n configurate."
   return 0
@@ -631,22 +683,6 @@ ensure_temporal_credentials() {
   return 0
 }
 
-ensure_temporal_client_config() {
-  local env_name="$1"
-  local env_dir="$2"
-  local env_file="${env_dir}/.env"
-
-  if [[ ! -f "$env_file" ]]; then
-    warn "[$env_name] .env assente — TEMPORAL_ADDRESS non configurato."
-    return 1
-  fi
-
-  upsert_env_var "$env_file" TEMPORAL_ADDRESS "temporal:7233"
-  upsert_env_var "$env_file" TEMPORAL_NAMESPACE "$env_name"
-  success "[$env_name] TEMPORAL_ADDRESS e TEMPORAL_NAMESPACE configurati."
-  return 0
-}
-
 ensure_grafana_credentials() {
   local env_file="${BASE_DIR}/.env.shared"
   local grafana_admin_user="admin"
@@ -663,23 +699,6 @@ ensure_grafana_credentials() {
   upsert_env_var "$env_file" GRAFANA_ADMIN_PASSWORD "$grafana_admin_password"
 
   success "Credenziali Grafana configurate in .env.shared."
-  return 0
-}
-
-ensure_otel_client_config() {
-  local env_name="$1"
-  local env_dir="$2"
-  local env_file="${env_dir}/.env"
-
-  if [[ ! -f "$env_file" ]]; then
-    warn "[$env_name] .env assente — variabili OTEL non configurate."
-    return 1
-  fi
-
-  upsert_env_var "$env_file" OTEL_EXPORTER_OTLP_ENDPOINT "http://otel-lgtm:4318"
-  upsert_env_var "$env_file" OTEL_EXPORTER_OTLP_PROTOCOL "http/protobuf"
-  upsert_env_var "$env_file" OTEL_SERVICE_NAME "assop2b-be-admin-${env_name}"
-  success "[$env_name] variabili OTEL configurate."
   return 0
 }
 
@@ -982,14 +1001,14 @@ setup_shared() {
     check_interrupt
     ensure_db_credentials "$env" "${BASE_DIR}/${env}" || return 1
     ensure_n8n_credentials "$env" "${BASE_DIR}/${env}" || return 1
-    ensure_temporal_client_config "$env" "${BASE_DIR}/${env}" || return 1
-    ensure_otel_client_config "$env" "${BASE_DIR}/${env}" || return 1
     ensure_auth_credentials "$env" "${BASE_DIR}/${env}" || return 1
+    prune_redundant_env_vars "$env" "${BASE_DIR}/${env}" || return 1
   done
 
   generate_caddyfile "$acme_email"
   generate_postgres_init || return 1
   generate_shared_compose
+  regenerate_env_compose_files || return 1
 
   info "Avvio stack condiviso..."
   if run_docker_compose "$BASE_DIR" --env-file .env.shared -f "$shared_compose" up -d; then
@@ -1020,6 +1039,7 @@ setup_compose() {
   ensure_db_credentials "$env_name" "$env_dir"
   ensure_n8n_credentials "$env_name" "$env_dir"
   ensure_auth_credentials "$env_name" "$env_dir"
+  prune_redundant_env_vars "$env_name" "$env_dir"
 
   info "[$env_name] Avvio container..."
   if run_docker_compose "$env_dir" up -d; then
@@ -1090,7 +1110,7 @@ print_summary() {
     warn "Temporal/UI esposti su host (7233/8080): limitare l'accesso via firewall. Elasticsearch non esposto su host."
     warn "Grafana otel-lgtm esposta su host :3300: limitare l'accesso via firewall. Credenziali in .env.shared (GRAFANA_ADMIN_*)."
     warn "otel-lgtm è pensato per dev/demo (Grafana Labs). Tempo (trace LGTM) ≠ Temporal (workflow)."
-    warn "Senza SDK OpenTelemetry nelle app non compariranno metriche/trace/log in Grafana; le variabili OTEL_* sono già nei .env per-env."
+    warn "Senza SDK OpenTelemetry nelle app non compariranno metriche/trace/log in Grafana; le variabili OTEL_* sono nel docker-compose.yml di be-admin."
   fi
 
   echo

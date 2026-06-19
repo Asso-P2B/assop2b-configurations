@@ -189,14 +189,14 @@ Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le 
 
 ### `{env}/.env` (per environment)
 
+Contiene **solo dati che variano per environment** (domini, secret, credenziali DB). Costanti e valori derivabili (OTEL, n8n host/webhook, `DB_POSTGRESDB_*`) sono nel `docker-compose.yml` generato da [`docker-compose-model.yml`](docker-compose-model.yml).
+
 | Variabile | Descrizione |
 |-----------|-------------|
 | `DOMAIN_WEBSITE` | Dominio sito pubblico (richiesto a prompt) |
 | `DOMAIN_ADMIN` | Dominio frontend admin (richiesto a prompt) |
 | `DOMAIN_API` | Dominio API backend (richiesto a prompt) |
 | `DOMAIN_N8N` | Dominio n8n (richiesto a prompt) |
-| `DB_HOST` | Hostname del container PostgreSQL (`postgres`) |
-| `DB_PORT` | Porta PostgreSQL (`5432`) |
 | `DB_NAME` | Nome database applicativo (`assop2b_{env}`) |
 | `DB_USER` | Utente database applicativo (`assop2b_{env}`) |
 | `DB_PASSWORD` | Password auto-generata (non sovrascritta su re-run) |
@@ -205,12 +205,6 @@ Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le 
 | `N8N_DB_USER` | Utente database n8n (`n8n_{env}`) |
 | `N8N_DB_PASSWORD` | Password database n8n (auto-generata, non sovrascritta su re-run) |
 | `N8N_ENCRYPTION_KEY` | Chiave crittografica n8n (auto-generata, non sovrascritta su re-run) |
-| `WEBHOOK_URL` | URL webhook n8n (`https://{DOMAIN_N8N}/`, auto-generato) |
-| `TEMPORAL_ADDRESS` | Endpoint gRPC Temporal interno (`temporal:7233`, auto-generato) |
-| `TEMPORAL_NAMESPACE` | Namespace Temporal dell'environment (`dev`, `stage`, `prod`, auto-generato) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP HTTP interno (`http://otel-lgtm:4318`, auto-generato) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | Protocollo OTLP (`http/protobuf`, auto-generato) |
-| `OTEL_SERVICE_NAME` | Nome servizio OpenTelemetry (`assop2b-be-admin-{env}`, auto-generato) |
 | `JWT_ACCESS_SECRET` | Secret JWT access token — **auto-generato** da `init-vps.sh` se assente |
 | `JWT_REFRESH_SECRET` | Secret JWT refresh token — auto-generato |
 | `JWT_LOGIN_CHALLENGE_SECRET` | Secret JWT step 2FA — auto-generato |
@@ -219,25 +213,53 @@ Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le 
 | `API_KEY_ENV` | Prefisso env nelle API key (`test` per dev/stage, `live` per prod) — auto-impostato |
 | `WEBSITE_CMS_API_KEY` | API key M2M (`cms.read`) per `website` — auto-generata; registrata in DB dal seed be-admin (`DB_SEED=true`) |
 
-`init-vps.sh` (`ensure_auth_credentials`) aggiunge le variabili auth sopra **solo se mancanti** (re-run idempotente). Il refresh JWT usa un cookie host-only sul dominio API (nessun attributo `Domain`).
+`init-vps.sh` (`ensure_auth_credentials`) aggiunge le variabili auth sopra **solo se mancanti** (re-run idempotente). `prune_redundant_env_vars` rimuove da `.env` le chiavi migrate nel compose (idempotente su re-run). Il refresh JWT usa un cookie host-only sul dominio API (nessun attributo `Domain`).
 
-Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`. Il servizio `website` riceve `NUXT_CMS_API_KEY` da `${WEBSITE_CMS_API_KEY}` nello stesso file.
+**Nel `docker-compose.yml` per environment** (non in `.env`):
+
+| Servizio | Variabili |
+|----------|-----------|
+| `be-admin` | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME` |
+| `n8n` | `DB_TYPE`, `DB_POSTGRESDB_*` (da `N8N_DB_*`), `N8N_HOST` / `WEBHOOK_URL` (da `DOMAIN_N8N`), costanti (`N8N_PROTOCOL`, `N8N_PORT`, …) |
+| `website` | `NUXT_CMS_API_KEY` da `${WEBSITE_CMS_API_KEY}` (interpolazione compose) |
+
+`be-admin` e `n8n` caricano comunque `{env}/.env` via `env_file` per secret e domini.
 
 Esempio per l'environment `dev`:
 
 ```bash
-DB_HOST=postgres
-DB_PORT=5432
+DOMAIN_WEBSITE=development.assop2b.it
+DOMAIN_ADMIN=development.fe.assop2b.it
+DOMAIN_API=development.be.assop2b.it
+DOMAIN_N8N=development.n8n.assop2b.it
 DB_NAME=assop2b_dev
 DB_USER=assop2b_dev
 DB_PASSWORD=<generata>
 DATABASE_URL=postgresql://assop2b_dev:<generata>@postgres:5432/assop2b_dev
-TEMPORAL_ADDRESS=temporal:7233
-TEMPORAL_NAMESPACE=dev
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-lgtm:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-OTEL_SERVICE_NAME=assop2b-be-admin-dev
+N8N_DB_NAME=n8n_dev
+N8N_DB_USER=n8n_dev
+N8N_DB_PASSWORD=<generata>
+N8N_ENCRYPTION_KEY=<generata>
+JWT_ACCESS_SECRET=<generata>
+# … altri secret auth …
+WEBSITE_CMS_API_KEY=<generata>
 ```
+
+### Migrazione VPS esistenti
+
+Se `{env}/.env` contiene ancora variabili obsolete (`DB_HOST`, `DB_POSTGRESDB_*`, `TEMPORAL_ADDRESS`, `OTEL_*`, …):
+
+1. Aggiornare `init-vps.sh` e `docker-compose-model.yml` sul server
+2. Rieseguire `init-vps.sh` (la fase `setup_shared` rigenera i compose, esegue il prune e riavvia `be-admin` / `n8n`)
+3. Verificare:
+
+```bash
+docker exec assop2b-dev-be-admin env | grep OTEL_
+docker exec assop2b-dev-n8n env | grep -E 'DB_POSTGRESDB|N8N_HOST|WEBHOOK'
+grep -E '^(DB_HOST|TEMPORAL_ADDRESS|OTEL_EXPORTER)' dev/.env && echo "obsolete keys still present" || echo "ok"
+```
+
+In alternativa manuale: rigenerare `{env}/docker-compose.yml` con `sed 's/__ENV__/dev/g' docker-compose-model.yml > dev/docker-compose.yml`, rimuovere le chiavi obsolete da `.env`, poi `docker compose up -d be-admin n8n` nella directory dell'environment.
 
 ## OpenTelemetry / otel-lgtm (stack condiviso)
 
@@ -267,7 +289,7 @@ Non usare `prometheus.remote_write` verso `:9009`: in `grafana/otel-lgtm:0.28` n
 
 **Sicurezza:** la porta host `3300` è esposta su tutte le interfacce. Limitare l'accesso via firewall VPS (es. solo IP fidati). Le porte OTLP `4317`/`4318` non sono mappate sull'host.
 
-**Dati in Grafana:** senza SDK OpenTelemetry nelle applicazioni non compariranno metriche, trace o log. Le variabili `OTEL_*` nei `{env}/.env` sono già configurate per un passo successivo di instrumentazione (es. in `be-admin`).
+**Dati in Grafana:** senza SDK OpenTelemetry nelle applicazioni non compariranno metriche, trace o log. Le variabili `OTEL_*` sono nel `docker-compose.yml` di `be-admin` (non in `{env}/.env`).
 
 ### Troubleshooting otel-lgtm
 
@@ -302,11 +324,11 @@ Temporal Server è un servizio condiviso tra tutti gli environment:
 
 ### Namespace Temporal
 
-| Environment | Namespace | Variabile in `{env}/.env` |
-|-------------|-----------|---------------------------|
-| `dev` | `dev` | `TEMPORAL_NAMESPACE=dev` |
-| `stage` | `stage` | `TEMPORAL_NAMESPACE=stage` |
-| `prod` | `prod` | `TEMPORAL_NAMESPACE=prod` |
+| Environment | Namespace | Note |
+|-------------|-----------|------|
+| `dev` | `dev` | Registrato da `ensure_temporal_namespaces` (nome env) |
+| `stage` | `stage` | Idem |
+| `prod` | `prod` | Idem |
 
 Solo gli environment con `{env}/.env` presente ricevono un namespace (registrato da `init-vps.sh` dopo l'avvio dello stack condiviso). Il namespace `default` non viene creato (`SKIP_DEFAULT_NAMESPACE_CREATION=true`).
 

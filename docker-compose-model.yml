@@ -31,6 +31,10 @@ services:
       context: ./assop2b-be-admin
     env_file:
       - .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: assop2b-be-admin-__ENV__
     expose:
       - "8080"
     networks:
@@ -42,6 +46,19 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER}
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD}
+      N8N_HOST: ${DOMAIN_N8N}
+      N8N_PROTOCOL: https
+      N8N_PORT: "5678"
+      WEBHOOK_URL: https://${DOMAIN_N8N}/
+      N8N_PROXY_HOPS: "1"
+      GENERIC_TIMEZONE: Europe/Rome
     expose:
       - "5678"
     volumes:
