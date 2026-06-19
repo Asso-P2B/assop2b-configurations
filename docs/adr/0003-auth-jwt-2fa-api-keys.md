@@ -21,7 +21,7 @@ Il backend `assop2b-be-admin` deve esporre un unico gate di autenticazione con d
 | Token | Durata | Storage |
 |-------|--------|---------|
 | Access | 15 min | `Authorization: Bearer` (FE: sessionStorage) |
-| Refresh | 30 gg | Cookie `httpOnly; Secure; SameSite=Strict; path=/api/auth` |
+| Refresh | 30 gg | Cookie `httpOnly; Secure; SameSite=Strict; path=/api/auth` — host-only sul dominio API (nessun attributo `Domain`) |
 | Login challenge | 3 min | JSON (solo durante step 2FA) |
 
 - Audience `staff`; memberships e permessi **non** nel JWT — caricati da DB su `/api/auth/me`
@@ -49,7 +49,9 @@ Il backend `assop2b-be-admin` deve esporre un unico gate di autenticazione con d
 
 ### Variabili ambiente (be-admin)
 
-`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_LOGIN_CHALLENGE_SECRET`, `TOTP_ENCRYPTION_KEY`, `COOKIE_SECRET`, opzionale `COOKIE_DOMAIN`, `WEBSITE_CMS_API_KEY` (sul servizio website).
+`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_LOGIN_CHALLENGE_SECRET`, `TOTP_ENCRYPTION_KEY`, `COOKIE_SECRET`, `API_KEY_ENV`, `WEBSITE_CMS_API_KEY`.
+
+**Provisioning:** `init-vps.sh` (`ensure_auth_credentials`) genera automaticamente i secret sopra in `{env}/.env` se assenti. `WEBSITE_CMS_API_KEY` viene anche registrata in `api_keys` dal seed be-admin (`DB_SEED=true`).
 
 ## Consequences
 

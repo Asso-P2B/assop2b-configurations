@@ -404,6 +404,27 @@ generate_random_password() {
   openssl rand -base64 24 | tr -d '\n/=+' | head -c 32
 }
 
+generate_auth_secret() {
+  openssl rand -hex 32
+}
+
+auth_api_key_env_for() {
+  local env_name="$1"
+  case "$env_name" in
+    prod) printf '%s' 'live' ;;
+    *) printf '%s' 'test' ;;
+  esac
+}
+
+generate_website_cms_api_key() {
+  local env_name="$1"
+  local api_env prefix secret
+  api_env="$(auth_api_key_env_for "$env_name")"
+  prefix="$(openssl rand -hex 4)"
+  secret="$(openssl rand -base64 24 | tr -d '\n/=+' | head -c 32)"
+  printf 'ap2b_%s_%s_%s' "$api_env" "$prefix" "$secret"
+}
+
 upsert_env_var() {
   local env_file="$1"
   local key="$2"
@@ -528,6 +549,48 @@ ensure_n8n_credentials() {
   upsert_env_var "$env_file" GENERIC_TIMEZONE "Europe/Rome"
 
   success "[$env_name] Credenziali n8n configurate."
+  return 0
+}
+
+ensure_auth_credentials() {
+  local env_name="$1"
+  local env_dir="$2"
+  local env_file="${env_dir}/.env"
+  local key secret api_key_env website_key
+  local -a auth_secret_keys=(
+    JWT_ACCESS_SECRET
+    JWT_REFRESH_SECRET
+    JWT_LOGIN_CHALLENGE_SECRET
+    TOTP_ENCRYPTION_KEY
+    COOKIE_SECRET
+  )
+
+  if [[ ! -f "$env_file" ]]; then
+    warn "[$env_name] .env assente — credenziali auth non generate."
+    return 1
+  fi
+
+  for key in "${auth_secret_keys[@]}"; do
+    secret="$(read_env_var "$env_file" "$key")"
+    if [[ -z "$secret" ]]; then
+      secret="$(generate_auth_secret)"
+      upsert_env_var "$env_file" "$key" "$secret"
+    fi
+  done
+
+  api_key_env="$(read_env_var "$env_file" API_KEY_ENV)"
+  if [[ -z "$api_key_env" ]]; then
+    api_key_env="$(auth_api_key_env_for "$env_name")"
+    upsert_env_var "$env_file" API_KEY_ENV "$api_key_env"
+  fi
+
+  website_key="$(read_env_var "$env_file" WEBSITE_CMS_API_KEY)"
+  if [[ -z "$website_key" ]]; then
+    website_key="$(generate_website_cms_api_key "$env_name")"
+    upsert_env_var "$env_file" WEBSITE_CMS_API_KEY "$website_key"
+  fi
+
+  success "[$env_name] Credenziali auth configurate."
   return 0
 }
 
@@ -921,6 +984,7 @@ setup_shared() {
     ensure_n8n_credentials "$env" "${BASE_DIR}/${env}" || return 1
     ensure_temporal_client_config "$env" "${BASE_DIR}/${env}" || return 1
     ensure_otel_client_config "$env" "${BASE_DIR}/${env}" || return 1
+    ensure_auth_credentials "$env" "${BASE_DIR}/${env}" || return 1
   done
 
   generate_caddyfile "$acme_email"
@@ -955,6 +1019,7 @@ setup_compose() {
   prompt_env_file "$env_name" "$env_dir"
   ensure_db_credentials "$env_name" "$env_dir"
   ensure_n8n_credentials "$env_name" "$env_dir"
+  ensure_auth_credentials "$env_name" "$env_dir"
 
   info "[$env_name] Avvio container..."
   if run_docker_compose "$env_dir" up -d; then
@@ -1028,6 +1093,10 @@ print_summary() {
     warn "Senza SDK OpenTelemetry nelle app non compariranno metriche/trace/log in Grafana; le variabili OTEL_* sono già nei .env per-env."
   fi
 
+  echo
+  info "Secret auth (JWT_*, TOTP_*, COOKIE_SECRET, WEBSITE_CMS_API_KEY) in {env}/.env — generati da init-vps se assenti."
+  info "La API key website viene registrata in DB al primo seed be-admin (DB_SEED=true)."
+  info "Il refresh JWT usa cookie host-only sul dominio API."
   echo
   info "I repository clonati non manterranno credenziali GitHub dopo la chiusura dello script."
 }

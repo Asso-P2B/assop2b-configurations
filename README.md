@@ -211,14 +211,17 @@ Per lo stack condiviso usare sempre `docker compose --env-file .env.shared`: le 
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP HTTP interno (`http://otel-lgtm:4318`, auto-generato) |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | Protocollo OTLP (`http/protobuf`, auto-generato) |
 | `OTEL_SERVICE_NAME` | Nome servizio OpenTelemetry (`assop2b-be-admin-{env}`, auto-generato) |
-| `JWT_ACCESS_SECRET` | Secret JWT access token (be-admin, generare in produzione) |
-| `JWT_REFRESH_SECRET` | Secret JWT refresh token |
-| `JWT_LOGIN_CHALLENGE_SECRET` | Secret JWT step 2FA |
-| `TOTP_ENCRYPTION_KEY` | Chiave AES per secret TOTP in DB |
-| `COOKIE_SECRET` | Firma cookie refresh |
-| `WEBSITE_CMS_API_KEY` | API key M2M con scope `cms.read` per il servizio `website` |
+| `JWT_ACCESS_SECRET` | Secret JWT access token — **auto-generato** da `init-vps.sh` se assente |
+| `JWT_REFRESH_SECRET` | Secret JWT refresh token — auto-generato |
+| `JWT_LOGIN_CHALLENGE_SECRET` | Secret JWT step 2FA — auto-generato |
+| `TOTP_ENCRYPTION_KEY` | Chiave AES per secret TOTP in DB — auto-generata |
+| `COOKIE_SECRET` | Firma cookie (`@fastify/cookie`) — auto-generata |
+| `API_KEY_ENV` | Prefisso env nelle API key (`test` per dev/stage, `live` per prod) — auto-impostato |
+| `WEBSITE_CMS_API_KEY` | API key M2M (`cms.read`) per `website` — auto-generata; registrata in DB dal seed be-admin (`DB_SEED=true`) |
 
-Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`.
+`init-vps.sh` (`ensure_auth_credentials`) aggiunge le variabili auth sopra **solo se mancanti** (re-run idempotente). Il refresh JWT usa un cookie host-only sul dominio API (nessun attributo `Domain`).
+
+Il servizio `be-admin` riceve `{env}/.env` tramite `env_file` definito in [`docker-compose-model.yml`](docker-compose-model.yml). Anche `n8n` usa lo stesso `env_file` per le variabili `DB_POSTGRESDB_*`, `N8N_*` e `WEBHOOK_URL`. Il servizio `website` riceve `NUXT_CMS_API_KEY` da `${WEBSITE_CMS_API_KEY}` nello stesso file.
 
 Esempio per l'environment `dev`:
 
