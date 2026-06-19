@@ -562,6 +562,11 @@ ensure_db_credentials() {
   upsert_env_var "$env_file" DB_PASSWORD "$db_password"
   upsert_env_var "$env_file" DATABASE_URL "$database_url"
 
+  db_seed="$(read_env_var "$env_file" DB_SEED)"
+  if [[ -z "$db_seed" ]]; then
+    upsert_env_var "$env_file" DB_SEED "true"
+  fi
+
   success "[$env_name] Credenziali DB configurate."
   return 0
 }
@@ -1115,7 +1120,7 @@ print_summary() {
 
   echo
   info "Secret auth (JWT_*, TOTP_*, COOKIE_SECRET, WEBSITE_CMS_API_KEY) in {env}/.env — generati da init-vps se assenti."
-  info "La API key website viene registrata in DB al primo seed be-admin (DB_SEED=true)."
+  info "DB_SEED=true in {env}/.env — seed utente demo + API key website al primo avvio be-admin (sovrascrivibile)."
   info "Il refresh JWT usa cookie host-only sul dominio API."
   echo
   info "I repository clonati non manterranno credenziali GitHub dopo la chiusura dello script."

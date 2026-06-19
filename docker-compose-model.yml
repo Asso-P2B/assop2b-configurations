@@ -19,7 +19,7 @@ services:
     build:
       context: ./assop2b-fe-admin
       args:
-        VITE_API_BASE_URL: https://${DOMAIN_API}
+        VITE_API_BASE_URL: https://${DOMAIN_API}/api
     expose:
       - "80"
     networks:
