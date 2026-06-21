@@ -5,6 +5,8 @@ services:
     container_name: assop2b-__ENV__-website
     build:
       context: ./assop2b-website
+      args:
+        NUXT_PUBLIC_FEATURE_FLAGS: ${WEBSITE_FEATURE_FLAGS:-{}}
     environment:
       NUXT_API_BASE_URL: https://${DOMAIN_API}
       NUXT_CMS_API_KEY: ${WEBSITE_CMS_API_KEY}
