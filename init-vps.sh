@@ -618,6 +618,8 @@ ensure_auth_credentials() {
     JWT_ACCESS_SECRET
     JWT_REFRESH_SECRET
     JWT_LOGIN_CHALLENGE_SECRET
+    JWT_PORTAL_ACCESS_SECRET
+    JWT_PORTAL_REFRESH_SECRET
     TOTP_ENCRYPTION_KEY
     COOKIE_SECRET
   )
@@ -645,6 +647,12 @@ ensure_auth_credentials() {
   if [[ -z "$website_key" ]]; then
     website_key="$(generate_website_cms_api_key "$env_name")"
     upsert_env_var "$env_file" WEBSITE_CMS_API_KEY "$website_key"
+  fi
+
+  secret="$(read_env_var "$env_file" WEBSITE_SESSION_SECRET)"
+  if [[ -z "$secret" ]]; then
+    secret="$(generate_auth_secret)"
+    upsert_env_var "$env_file" WEBSITE_SESSION_SECRET "$secret"
   fi
 
   success "[$env_name] Credenziali auth configurate."

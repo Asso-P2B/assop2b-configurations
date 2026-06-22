@@ -209,10 +209,13 @@ Contiene **solo dati che variano per environment** (domini, secret, credenziali 
 | `JWT_ACCESS_SECRET` | Secret JWT access token — **auto-generato** da `init-vps.sh` se assente |
 | `JWT_REFRESH_SECRET` | Secret JWT refresh token — auto-generato |
 | `JWT_LOGIN_CHALLENGE_SECRET` | Secret JWT step 2FA — auto-generato |
+| `JWT_PORTAL_ACCESS_SECRET` | Secret JWT access portale clienti — auto-generato |
+| `JWT_PORTAL_REFRESH_SECRET` | Secret JWT refresh portale clienti — auto-generato |
 | `TOTP_ENCRYPTION_KEY` | Chiave AES per secret TOTP in DB — auto-generata |
 | `COOKIE_SECRET` | Firma cookie (`@fastify/cookie`) — auto-generata |
 | `API_KEY_ENV` | Prefisso env nelle API key (`test` per dev/stage, `live` per prod) — auto-impostato |
 | `WEBSITE_CMS_API_KEY` | API key M2M (`cms.read`) per `website` — auto-generata; registrata in DB dal seed be-admin (`DB_SEED=true`) |
+| `WEBSITE_SESSION_SECRET` | Secret per cookie sessione BFF area riservata (`NUXT_SESSION_SECRET`) — auto-generata |
 | `WEBSITE_FEATURE_FLAGS` | JSON feature flag website (build-time). Default `{}`. Es.: `{"privateArea":true}` |
 
 `init-vps.sh` (`ensure_auth_credentials`) aggiunge le variabili auth sopra **solo se mancanti** (re-run idempotente). `prune_redundant_env_vars` rimuove da `.env` le chiavi migrate nel compose (idempotente su re-run). Il refresh JWT usa un cookie host-only sul dominio API (nessun attributo `Domain`).
@@ -223,7 +226,7 @@ Contiene **solo dati che variano per environment** (domini, secret, credenziali 
 |----------|-----------|
 | `be-admin` | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME` |
 | `n8n` | `DB_TYPE`, `DB_POSTGRESDB_*` (da `N8N_DB_*`), `N8N_HOST` / `WEBHOOK_URL` (da `DOMAIN_N8N`), costanti (`N8N_PROTOCOL`, `N8N_PORT`, …) |
-| `website` | `NUXT_CMS_API_KEY` da `${WEBSITE_CMS_API_KEY}`; build arg `NUXT_PUBLIC_FEATURE_FLAGS` da `${WEBSITE_FEATURE_FLAGS:-{}}` |
+| `website` | `NUXT_CMS_API_KEY` da `${WEBSITE_CMS_API_KEY}`; `NUXT_SESSION_SECRET` da `${WEBSITE_SESSION_SECRET}`; build arg `NUXT_PUBLIC_FEATURE_FLAGS` da `${WEBSITE_FEATURE_FLAGS:-{}}` |
 
 `be-admin` e `n8n` caricano comunque `{env}/.env` via `env_file` per secret e domini.
 

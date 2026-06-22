@@ -57,8 +57,8 @@ Le migrazioni restano **codice nel repo BE**, non in `assop2b-configurations`. L
 
 ## Follow-up
 
-- Implementare schema applicativo in `assop2b-be-admin` allineato al [ContrattoApi](https://github.com/Asso-P2B/assop2b-fe-admin/blob/main/docs/ContrattoApi.md) (sedi → RBAC → contatti → accessi portale)
-- Test integrazione DB (Testcontainers o Postgres dedicato) quando esisterà schema applicativo
+- Estendere tabella `contacts` al modello CRM completo (ContrattoApi § Contatti)
+- Test integrazione DB (Testcontainers o Postgres dedicato) per flussi portal end-to-end
 
 ## Riferimenti
 
