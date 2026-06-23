@@ -8,7 +8,7 @@ Accepted
 
 L'ecosistema Asso P2B richiede:
 
-- **Staff backoffice** (`assop2b-fe-admin`): login umano con JWT, refresh sessione, RBAC team-based
+- **Staff backoffice** (`assop2b-fe-admin`): login umano con JWT, refresh sessione, RBAC capability-based (ruoli configurabili da UI, data scope su capability)
 - **Website pubblico** (`assop2b-website`): consumo futuro di contenuti CMS via chiamate server-side autenticate con API key
 - **Integrazioni M2M**: servizi esterni senza identità utente
 
@@ -24,7 +24,7 @@ Il backend `assop2b-be-admin` deve esporre un unico gate di autenticazione con d
 | Refresh | 30 gg | Cookie `httpOnly; Secure; SameSite=Strict; path=/api/auth` — host-only sul dominio API (nessun attributo `Domain`) |
 | Login challenge | 3 min | JSON (solo durante step 2FA) |
 
-- Audience `staff`; memberships e permessi **non** nel JWT — caricati da DB su `/api/auth/me`
+- Audience `staff`; ruoli e capability **non** nel JWT — `AuthUser` flat (`branch` + `roles[]`) su `/api/auth/me`, catalogo capability su `/api/rbac/catalog`
 - Refresh rotation con `familyId`; riuso revoca l'intera famiglia
 
 ### 2FA TOTP

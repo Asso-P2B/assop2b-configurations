@@ -19,8 +19,8 @@ La persistenza applicativa del CRM è responsabilità del repository `assop2b-be
 
 Il dominio CRM prevede:
 
-- RBAC dinamico con relazioni molti-a-molti (permessi, ruoli, membership team)
-- Filtri per scope operativo (`X-Team-Id`)
+- RBAC capability-based con relazioni molti-a-molti (capabilities, ruoli, `user_roles`)
+- Data scope su capability (`global` vs `branch` via `user.branchId`)
 - Modelli ricchi (contatti con anagrafica, consensi GDPR, provenienza)
 - Migrazioni schema versionate nel repository BE
 
@@ -44,7 +44,7 @@ Le migrazioni restano **codice nel repo BE**, non in `assop2b-configurations`. L
 ### Positive
 
 - Type-safety end-to-end senza runtime pesante
-- Query relazionali esplicite per RBAC e scope team
+- Query relazionali esplicite per RBAC e data scope per sede
 - Allineamento naturale con Fastify e Vitest
 - PostgreSQL-first (JSONB, enum, constraint)
 - Catalogo ADR centralizzato in `assop2b-configurations` per decisioni cross-repo
