@@ -13,6 +13,35 @@ Lo script [`init-vps.sh`](init-vps.sh) orchestra l'inizializzazione completa: cl
 
 Le credenziali GitHub vengono richieste in modo one-shot durante l'esecuzione dello script e non vengono salvate sulla macchina.
 
+## Design tokens
+
+La palette condivisa ASSO P2B vive in [`packages/design-tokens/`](packages/design-tokens/) (`@assop2b/design-tokens`).
+
+- **Brand anchor:** `#004D77` (primary), `#5D92AA` (secondary), `#002B42` (surface)
+- **Token semantici:** background, foreground, primary, muted, accent, destructive, sidebar, chart — light + dark
+- **WCAG 2.2 AA:** validazione con `node packages/design-tokens/scripts/check-contrast.mjs`
+
+### Installazione nei consumer
+
+**Dev locale** (repo sibling):
+
+```json
+"@assop2b/design-tokens": "file:../assop2b-configurations/packages/design-tokens"
+```
+
+**CI / Docker** (git dependency):
+
+```json
+"@assop2b/design-tokens": "github:AssoP2B/assop2b-configurations#main:packages/design-tokens"
+```
+
+```css
+@import "tailwindcss";
+@import "@assop2b/design-tokens";
+```
+
+Consumer attuali: `assop2b-website`, `assop2b-fe-admin`. Dettagli in [packages/design-tokens/README.md](packages/design-tokens/README.md).
+
 ## Avvio rapido
 
 ```bash
