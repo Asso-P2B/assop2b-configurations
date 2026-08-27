@@ -15,32 +15,12 @@ Le credenziali GitHub vengono richieste in modo one-shot durante l'esecuzione de
 
 ## Design tokens
 
-La palette condivisa ASSO P2B vive in [`packages/design-tokens/`](packages/design-tokens/) (`@assop2b/design-tokens`).
+La palette ASSO P2B (`@assop2b/design-tokens`) è duplicata in ciascun frontend:
 
-- **Brand anchor:** `#004D77` (primary), `#5D92AA` (secondary), `#002B42` (surface)
-- **Token semantici:** background, foreground, primary, muted, accent, destructive, sidebar, chart — light + dark
-- **WCAG 2.2 AA:** validazione con `node packages/design-tokens/scripts/check-contrast.mjs`
+- [`assop2b-fe-admin/packages/design-tokens`](https://github.com/Asso-P2B/assop2b-fe-admin/tree/main/packages/design-tokens)
+- [`assop2b-website/packages/design-tokens`](https://github.com/Asso-P2B/assop2b-website/tree/main/packages/design-tokens)
 
-### Installazione nei consumer
-
-**Dev locale** (repo sibling):
-
-```json
-"@assop2b/design-tokens": "file:../assop2b-configurations/packages/design-tokens"
-```
-
-**CI / Docker** (git dependency):
-
-```json
-"@assop2b/design-tokens": "github:AssoP2B/assop2b-configurations#main:packages/design-tokens"
-```
-
-```css
-@import "tailwindcss";
-@import "@assop2b/design-tokens";
-```
-
-Consumer attuali: `assop2b-website`, `assop2b-fe-admin`. Dettagli in [packages/design-tokens/README.md](packages/design-tokens/README.md).
+Se cambi colori o token semantici, aggiorna **entrambe** le copie (o copia da un repo all’altro).
 
 ## Avvio rapido
 

@@ -1,8 +1,0 @@
-/* ASSO P2B — anchor brand colors (from logo, do not change) */
-:root {
-  --brand-primary: #004D77;
-  --brand-secondary: #5D92AA;
-  --brand-surface: #002B42;
-  /* WCAG AA text variant — brand-secondary is too light for small text on white */
-  --brand-secondary-text: #3D6F86;
-}
