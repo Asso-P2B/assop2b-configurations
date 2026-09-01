@@ -211,6 +211,8 @@ Contiene **solo dati che variano per environment** (domini, secret, credenziali 
 | `DB_PASSWORD` | Password auto-generata (non sovrascritta su re-run) |
 | `DATABASE_URL` | Connection string completa per be-admin |
 | `DB_SEED` | Seed dati demo be-admin (`true` di default) — auto-impostato da `init-vps.sh` se assente |
+| `SEED_ADMIN_EMAIL` | Email utente admin demo per seed be-admin — auto-generata (`seed-admin-{env}@assop2b.local`) se assente |
+| `SEED_ADMIN_PASSWORD` | Password utente admin demo per seed be-admin — auto-generata se assente |
 | `N8N_DB_NAME` | Database n8n (`n8n_{env}`) |
 | `N8N_DB_USER` | Utente database n8n (`n8n_{env}`) |
 | `N8N_DB_PASSWORD` | Password database n8n (auto-generata, non sovrascritta su re-run) |
@@ -251,6 +253,8 @@ DB_USER=assop2b_dev
 DB_PASSWORD=<generata>
 DATABASE_URL=postgresql://assop2b_dev:<generata>@postgres:5432/assop2b_dev
 DB_SEED=true
+SEED_ADMIN_EMAIL=seed-admin-dev@assop2b.local
+SEED_ADMIN_PASSWORD=<generata>
 N8N_DB_NAME=n8n_dev
 N8N_DB_USER=n8n_dev
 N8N_DB_PASSWORD=<generata>

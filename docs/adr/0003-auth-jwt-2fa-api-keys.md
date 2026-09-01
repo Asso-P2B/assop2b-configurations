@@ -65,7 +65,7 @@ Il backend `assop2b-be-admin` deve esporre un unico gate di autenticazione con d
 
 `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_LOGIN_CHALLENGE_SECRET`, `JWT_PORTAL_ACCESS_SECRET`, `JWT_PORTAL_REFRESH_SECRET`, `TOTP_ENCRYPTION_KEY`, `COOKIE_SECRET`, `API_KEY_ENV`, `WEBSITE_CMS_API_KEY`, `WEBSITE_SESSION_SECRET` (website BFF).
 
-**Provisioning:** `init-vps.sh` (`ensure_auth_credentials`) genera automaticamente i secret sopra in `{env}/.env` se assenti. `ensure_db_credentials` imposta `DB_SEED=true` se assente. Con seed attivo, `WEBSITE_CMS_API_KEY` viene registrata in `api_keys`.
+**Provisioning:** `init-vps.sh` (`ensure_auth_credentials`) genera automaticamente i secret sopra in `{env}/.env` se assenti. `ensure_db_credentials` imposta `DB_SEED=true` se assente e genera `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` se assenti. Con seed attivo, `WEBSITE_CMS_API_KEY` viene registrata in `api_keys` e l'utente admin demo usa le credenziali seed da env (obbligatorie, nessun fallback nel codice).
 
 ## Consequences
 

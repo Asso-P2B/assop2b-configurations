@@ -567,6 +567,18 @@ ensure_db_credentials() {
     upsert_env_var "$env_file" DB_SEED "true"
   fi
 
+  seed_admin_email="$(read_env_var "$env_file" SEED_ADMIN_EMAIL)"
+  if [[ -z "$seed_admin_email" ]]; then
+    seed_admin_email="seed-admin-${env_name}@assop2b.local"
+    upsert_env_var "$env_file" SEED_ADMIN_EMAIL "$seed_admin_email"
+  fi
+
+  seed_admin_password="$(read_env_var "$env_file" SEED_ADMIN_PASSWORD)"
+  if [[ -z "$seed_admin_password" ]]; then
+    seed_admin_password="$(generate_random_password)"
+    upsert_env_var "$env_file" SEED_ADMIN_PASSWORD "$seed_admin_password"
+  fi
+
   success "[$env_name] Credenziali DB configurate."
   return 0
 }
@@ -1129,6 +1141,7 @@ print_summary() {
   echo
   info "Secret auth (JWT_*, TOTP_*, COOKIE_SECRET, WEBSITE_CMS_API_KEY) in {env}/.env — generati da init-vps se assenti."
   info "DB_SEED=true in {env}/.env — seed utente demo + API key website al primo avvio be-admin (sovrascrivibile)."
+  info "SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD in {env}/.env — obbligatorie con DB_SEED; generate da init-vps se assenti."
   info "Il refresh JWT usa cookie host-only sul dominio API."
   echo
   info "I repository clonati non manterranno credenziali GitHub dopo la chiusura dello script."
