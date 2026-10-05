@@ -43,7 +43,7 @@ Lo script guida l'operatore attraverso:
 
 Il deploy si articola su due livelli (motivazione in [ADR 0001](docs/adr/0001-confini-stack-condiviso-vs-environment.md)):
 
-- **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin`, `be-admin` e `n8n` su rete Docker isolata `assop2b-{env}`
+- **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin`, `be-admin`, `be-admin-worker` e `n8n` su rete Docker isolata `assop2b-{env}`
 - **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS), PostgreSQL, Elasticsearch, Temporal Server, Temporal Web UI e otel-lgtm (OpenTelemetry + Grafana)
 
 ```mermaid
@@ -235,7 +235,8 @@ Contiene **solo dati che variano per environment** (domini, secret, credenziali 
 
 | Servizio | Variabili |
 |----------|-----------|
-| `be-admin` | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME` |
+| `be-admin` | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME`, `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` |
+| `be-admin-worker` | stesse `OTEL_*` / `TEMPORAL_*` + `DB_MIGRATE_ON_START=false` (worker Temporal promemoria) |
 | `n8n` | `DB_TYPE`, `DB_POSTGRESDB_*` (da `N8N_DB_*`), `N8N_HOST` / `WEBHOOK_URL` (da `DOMAIN_N8N`), costanti (`N8N_PROTOCOL`, `N8N_PORT`, …) |
 | `website` | `NUXT_CMS_API_KEY` da `${WEBSITE_CMS_API_KEY}`; `NUXT_SESSION_SECRET` da `${WEBSITE_SESSION_SECRET}`; build arg `NUXT_PUBLIC_FEATURE_FLAGS` da `${WEBSITE_FEATURE_FLAGS:-{}}` |
 

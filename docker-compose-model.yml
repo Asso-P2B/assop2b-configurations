@@ -38,8 +38,36 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_SERVICE_NAME: assop2b-be-admin-__ENV__
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: __ENV__
     expose:
       - "8080"
+    networks:
+      - assop2b-__ENV__
+
+  be-admin-worker:
+    container_name: assop2b-__ENV__-be-admin-worker
+    build:
+      context: ./assop2b-be-admin
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: assop2b-be-admin-worker-__ENV__
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: __ENV__
+      DB_MIGRATE_ON_START: "false"
+    command:
+      [
+        "node",
+        "--import",
+        "./dist/src/instrumentation.js",
+        "dist/src/temporal/worker.js",
+      ]
+    healthcheck:
+      disable: true
     networks:
       - assop2b-__ENV__
 
