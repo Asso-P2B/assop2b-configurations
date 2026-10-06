@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   caddy:
     image: caddy:2-alpine
@@ -12,6 +18,7 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    logging: *default-logging
     networks:
 __CADDY_NETWORKS__
 
@@ -26,6 +33,7 @@ __CADDY_NETWORKS__
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    logging: *default-logging
     networks:
 __POSTGRES_NETWORKS__
       - assop2b-internal
@@ -51,6 +59,7 @@ __POSTGRES_NETWORKS__
       - "9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
+    logging: *default-logging
     networks:
       - assop2b-internal
     healthcheck:
@@ -88,6 +97,7 @@ __POSTGRES_NETWORKS__
       SKIP_DEFAULT_NAMESPACE_CREATION: "true"
     ports:
       - "7233:7233"
+    logging: *default-logging
     networks:
 __TEMPORAL_NETWORKS__
       - assop2b-internal
@@ -110,6 +120,7 @@ __TEMPORAL_NETWORKS__
       TEMPORAL_CORS_ORIGINS: http://localhost:8080
     ports:
       - "8080:8080"
+    logging: *default-logging
     networks:
       - assop2b-internal
 
@@ -129,6 +140,7 @@ __TEMPORAL_NETWORKS__
       - "4318"
     volumes:
       - otel_lgtm_data:/data
+    logging: *default-logging
     networks:
 __OTEL_LGTM_NETWORKS__
       - assop2b-internal
@@ -150,6 +162,7 @@ __OTEL_LGTM_NETWORKS__
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /:/host:ro
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    logging: *default-logging
     networks:
       - assop2b-internal
     command:

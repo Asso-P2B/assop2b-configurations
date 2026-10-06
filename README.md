@@ -432,6 +432,12 @@ GRANT ALL PRIVILEGES ON DATABASE temporal TO temporal;
 SQL
 ```
 
+## Spazio disco: log Docker e prune deploy
+
+I compose model impostano rotazione log Docker (`json-file`, `max-size: 10m`, `max-file: 3`) su tutti i servizi. Dopo un aggiornamento di `docker-compose-model.yml` / `docker-compose-shared-model.yml` sulla VPS, rieseguire `init-vps.sh` (rigenera i compose) e ricreare i container (`docker compose up -d` sullo stack condiviso e su ogni environment) perché le opzioni `logging` si applicano al recreate.
+
+I deploy CI di `assop2b-be-admin`, `assop2b-fe-admin` e `assop2b-website`, dopo `up -d`, eseguono `docker image prune -f` e `docker builder prune -f --filter until=24h` (immagini dangling + cache BuildKit più vecchia di 24h).
+
 ## Operazioni comuni
 
 ### Stack condiviso
