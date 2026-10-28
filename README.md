@@ -41,7 +41,7 @@ Lo script guida l'operatore attraverso:
 
 ## Architettura
 
-Il deploy si articola su due livelli (motivazione in [ADR 0001](docs/adr/0001-confini-stack-condiviso-vs-environment.md)):
+Il deploy si articola su due livelli (motivazione nell'ADR 0001, nel repo privato `assop2b-docs`):
 
 - **Stack per environment** — `{env}/docker-compose.yml`: servizi `website`, `fe-admin`, `be-admin`, `be-admin-worker` e `n8n` su rete Docker isolata `assop2b-{env}`
 - **Stack condiviso** — `docker-compose.shared.yml`: Caddy (reverse proxy TLS), PostgreSQL, Elasticsearch, Temporal Server, Temporal Web UI e otel-lgtm (OpenTelemetry + Grafana)
@@ -145,12 +145,7 @@ Il file `caddy/Caddyfile` viene generato automaticamente da `init-vps.sh`:
 
 ## ADR
 
-Le decisioni architetturali rilevanti sono tracciate come **Architectural Decision Record** in [`docs/adr/`](docs/adr/).
-
-| ADR | Titolo | Status |
-|-----|--------|--------|
-| [0001](docs/adr/0001-confini-stack-condiviso-vs-environment.md) | Confini e responsabilità tra stack condiviso e stack per environment | Accepted |
-| [0002](docs/adr/0002-drizzle-orm.md) | Drizzle ORM per persistenza applicativa (assop2b-be-admin) | Accepted |
+Le decisioni architetturali (Architectural Decision Record) sono state spostate il 28/10/2026 nel repo privato **`Asso-P2B/assop2b-docs`**, cartella `adr/`, insieme alle spec funzionali. Lì si trovano anche le ADR 0001, 0002 e 0003 che prima stavano in `docs/adr/` di questo repo. Questo repo è pubblico e contiene solo l'infrastruttura di deploy.
 
 Per il contesto operativo (compose, variabili, troubleshooting) fare riferimento alle sezioni seguenti di questo README.
 
