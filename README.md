@@ -223,6 +223,15 @@ Contiene **solo dati che variano per environment** (domini, secret, credenziali 
 | `WEBSITE_CMS_API_KEY` | API key M2M (`cms.read`) per `website` — auto-generata; registrata in DB dal seed be-admin (`DB_SEED=true`) |
 | `WEBSITE_SESSION_SECRET` | Secret per cookie sessione BFF area riservata (`NUXT_SESSION_SECRET`) — auto-generata |
 | `WEBSITE_FEATURE_FLAGS` | JSON feature flag website (build-time). Default `{}`. Es.: `{"privateArea":true}` |
+| `S3_ENDPOINT` | Endpoint dell'object storage S3 compatibile (es. `https://<location>.your-objectstorage.com`): **a mano**, non generato |
+| `S3_REGION` | Regione dello storage (il codice della location), a mano |
+| `S3_BUCKET` | Nome del bucket privato, a mano |
+| `S3_ACCESS_KEY_ID` | Access key S3: **secret**, a mano, una chiave per environment |
+| `S3_SECRET_ACCESS_KEY` | Secret key S3: **secret**, a mano, mai nel repo né nei log |
+| `S3_FORCE_PATH_STYLE` | `false` sugli environment (indirizzi virtual-hosted); `true` solo con MinIO in locale |
+| `STORAGE_PREFIX` | Cartella dell'environment nel bucket: **deve essere** `dev`, `stage` o `prod`, uguale al nome dell'environment |
+
+Le variabili `S3_*` e `STORAGE_PREFIX` **non** sono generate da `init-vps.sh`: si scrivono a mano in `{env}/.env`. Dopo averle aggiunte, ricreare i container che le leggono: `docker compose up -d be-admin be-admin-worker` nella directory dell'environment.
 
 `init-vps.sh` (`ensure_auth_credentials`) aggiunge le variabili auth sopra **solo se mancanti** (re-run idempotente). `prune_redundant_env_vars` rimuove da `.env` le chiavi migrate nel compose (idempotente su re-run). Il refresh JWT usa un cookie host-only sul dominio API (nessun attributo `Domain`).
 
