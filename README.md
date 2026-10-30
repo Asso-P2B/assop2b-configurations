@@ -233,6 +233,68 @@ Contiene **solo dati che variano per environment** (domini, secret, credenziali 
 
 Le variabili `S3_*` e `STORAGE_PREFIX` **non** sono generate da `init-vps.sh`: si scrivono a mano in `{env}/.env`. Dopo averle aggiunte, ricreare i container che le leggono: `docker compose up -d be-admin be-admin-worker` nella directory dell'environment.
 
+### CORS del bucket
+
+Il pannello carica i file direttamente nello storage con un link firmato (`PUT` dal browser), quindi il bucket deve ammettere le origini del pannello e del sito. Il CORS **non** si imposta dalla console Hetzner: solo con strumenti S3 (AWS CLI o s3cmd). Configurato il 30/10/2026; prima il bucket non aveva regole.
+
+Regole attuali (`cors-assop2b.json`, nessun segreto):
+
+```json
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://development.fe.assop2b.it",
+        "https://development.assop2b.it",
+        "https://stage.fe.assop2b.it",
+        "https://stage.assop2b.it",
+        "https://fe.assop2b.it",
+        "https://funnel.assop2b.it",
+        "https://site.assop2b.it"
+      ],
+      "AllowedMethods": ["PUT", "GET", "HEAD"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag"],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}
+```
+
+- `PUT`: caricamento dal pannello. `GET` e `HEAD`: il sito, se legge i file da JavaScript.
+- `funnel.assop2b.it` e `site.assop2b.it` ci sono entrambi: il sito di produzione cambierà nome.
+
+**Applicare o modificare** (dal proprio computer, AWS CLI installato). Le chiavi solo nella sessione del terminale, mai in un file del repo:
+
+```bash
+export AWS_ACCESS_KEY_ID=...            # chiave S3, per esempio quella di dev
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_DEFAULT_REGION=nbg1
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required   # AWS CLI recente con storage non Amazon
+export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+
+aws s3api get-bucket-cors --bucket assop2b --endpoint-url https://nbg1.your-objectstorage.com
+aws s3api put-bucket-cors --bucket assop2b --endpoint-url https://nbg1.your-objectstorage.com \
+  --cors-configuration file://cors-assop2b.json
+```
+
+- `put-bucket-cors` **sostituisce** tutte le regole: si modifica il file completo e lo si riapplica, mai una regola sola.
+- Senza regole, `get-bucket-cors` risponde `404 NoSuchCORSConfiguration`; AWS CLI 2.39 lo mostra come `argument of type 'NoneType' is not a container or iterable` (con `--debug` si vede il 404).
+- Annullare: `aws s3api delete-bucket-cors --bucket assop2b --endpoint-url https://nbg1.your-objectstorage.com`.
+
+**Verificare** come fa il browser prima di un caricamento:
+
+```bash
+curl -s -i -X OPTIONS "https://assop2b.nbg1.your-objectstorage.com/dev/prova-cors" \
+  -H "Origin: https://development.fe.assop2b.it" -H "Access-Control-Request-Method: PUT"
+```
+
+Origine ammessa: `200` con `access-control-allow-origin` uguale all'origine. Origine non in lista: `403 AccessDenied`.
+
+**Nota sulle chiavi:** su Hetzner le credenziali S3 valgono per tutti i bucket del progetto. Una chiave per environment serve a poterne revocare una sola, ma non isola le cartelle `dev/`, `stage/`, `prod/`.
+
 `init-vps.sh` (`ensure_auth_credentials`) aggiunge le variabili auth sopra **solo se mancanti** (re-run idempotente). `prune_redundant_env_vars` rimuove da `.env` le chiavi migrate nel compose (idempotente su re-run). Il refresh JWT usa un cookie host-only sul dominio API (nessun attributo `Domain`).
 
 **Nel `docker-compose.yml` per environment** (non in `.env`):
