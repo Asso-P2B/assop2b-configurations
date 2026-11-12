@@ -134,6 +134,30 @@ Il file `caddy/Caddyfile` viene generato automaticamente da `init-vps.sh`:
 | `DOMAIN_ADMIN` | `assop2b-{env}-fe-admin:80` |
 | `DOMAIN_API` | `assop2b-{env}-be-admin:8080` |
 | `DOMAIN_N8N` | `assop2b-{env}-n8n:5678` |
+| `DOMAIN_WEBSITE_REDIRECT_FROM` (facoltativa) | redirect 301 verso `DOMAIN_WEBSITE`, con percorso e query string |
+
+Esempio, nel `.env` dell'ambiente (host separati da virgola):
+
+```
+DOMAIN_WEBSITE=site.example.test
+DOMAIN_WEBSITE_REDIRECT_FROM=old.example.test
+```
+
+Nel Caddyfile `old.example.test` risponde con un redirect 301 verso `https://site.example.test` mantenendo percorso e query string. Un host di redirect non può coincidere con una `DOMAIN_*` di nessun ambiente né comparire due volte: in quel caso lo script si ferma con un errore e il Caddyfile non viene toccato.
+
+Per rigenerare solo il Caddyfile, dalla cartella base:
+
+```bash
+./init-vps.sh caddyfile
+```
+
+Il comando legge i `.env` degli ambienti e `ACME_EMAIL` da `.env.shared`, riscrive `caddy/Caddyfile` e stampa il comando di reload. Non chiede credenziali GitHub, non controlla i prerequisiti, non tocca docker né git e non modifica nessun altro file.
+
+Per applicare il nuovo Caddyfile senza riavviare lo stack, dalla cartella base:
+
+```bash
+docker compose --env-file .env.shared -f docker-compose.shared.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
 
 ### Mapping branch Git
 
@@ -201,6 +225,7 @@ Contiene **solo dati che variano per environment** (domini, secret, credenziali 
 | `DOMAIN_ADMIN` | Dominio frontend admin (richiesto a prompt) |
 | `DOMAIN_API` | Dominio API backend (richiesto a prompt) |
 | `DOMAIN_N8N` | Dominio n8n (richiesto a prompt) |
+| DOMAIN_WEBSITE_REDIRECT_FROM | Facoltativa. Host separati da virgola che fanno redirect 301 verso DOMAIN_WEBSITE, con percorso e query string. Non richiesta a prompt; si perde se si sovrascrive il .env |
 | `DB_NAME` | Nome database applicativo (`assop2b_{env}`) |
 | `DB_USER` | Utente database applicativo (`assop2b_{env}`) |
 | `DB_PASSWORD` | Password auto-generata (non sovrascritta su re-run) |
