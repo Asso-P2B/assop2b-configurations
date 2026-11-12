@@ -841,10 +841,76 @@ prompt_shared_env() {
   success ".env.shared creato."
 }
 
+parse_host_list() {
+  local value="$1"
+  local items=()
+  local item i
+
+  IFS=',' read -ra items <<< "$value"
+
+  for ((i = 0; i < ${#items[@]}; i++)); do
+    item="${items[$i]}"
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    if [[ -n "$item" ]]; then
+      printf '%s\n' "$item"
+    fi
+  done
+
+  return 0
+}
+
+validate_redirect_hosts() {
+  local env env_file key host i
+  local domain_hosts=()
+  local domain_envs=()
+  local redirect_hosts=()
+  local redirect_envs=()
+
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    env_file="${BASE_DIR}/${env}/.env"
+    for key in DOMAIN_WEBSITE DOMAIN_ADMIN DOMAIN_API DOMAIN_N8N; do
+      host="$(read_env_var "$env_file" "$key")"
+      if [[ -n "$host" ]]; then
+        domain_hosts+=("$host")
+        domain_envs+=("$env")
+      fi
+    done
+  done
+
+  for env in "${DISCOVERED_ENVS[@]}"; do
+    env_file="${BASE_DIR}/${env}/.env"
+    while IFS= read -r host; do
+      [[ -z "$host" ]] && continue
+
+      for ((i = 0; i < ${#domain_hosts[@]}; i++)); do
+        if [[ "$host" == "${domain_hosts[$i]}" ]]; then
+          error "Host di redirect ${host} (ambiente ${env}) uguale a un DOMAIN_* dell'ambiente ${domain_envs[$i]}."
+          return 1
+        fi
+      done
+
+      for ((i = 0; i < ${#redirect_hosts[@]}; i++)); do
+        if [[ "$host" == "${redirect_hosts[$i]}" ]]; then
+          error "Host di redirect ${host} ripetuto (ambienti ${redirect_envs[$i]} e ${env})."
+          return 1
+        fi
+      done
+
+      redirect_hosts+=("$host")
+      redirect_envs+=("$env")
+    done <<< "$(parse_host_list "$(read_env_var "$env_file" DOMAIN_WEBSITE_REDIRECT_FROM)")"
+  done
+
+  return 0
+}
+
 generate_caddyfile() {
   local acme_email="$1"
   local caddyfile="${BASE_DIR}/caddy/Caddyfile"
-  local env env_file domain_website domain_admin domain_api domain_n8n
+  local env env_file domain_website domain_admin domain_api domain_n8n redirect_host
+
+  validate_redirect_hosts || return 1
 
   mkdir -p "${BASE_DIR}/caddy"
 
@@ -867,6 +933,19 @@ EOF
 ${domain_website} {
 	reverse_proxy assop2b-${env}-website:3000
 }
+EOF
+
+    while IFS= read -r redirect_host; do
+      [[ -z "$redirect_host" ]] && continue
+      cat >> "$caddyfile" << EOF
+
+${redirect_host} {
+	redir https://${domain_website}{uri} permanent
+}
+EOF
+    done <<< "$(parse_host_list "$(read_env_var "$env_file" DOMAIN_WEBSITE_REDIRECT_FROM)")"
+
+    cat >> "$caddyfile" << EOF
 
 ${domain_admin} {
 	reverse_proxy assop2b-${env}-fe-admin:80
@@ -883,6 +962,26 @@ EOF
   done
 
   success "caddy/Caddyfile generato."
+}
+
+regenerate_caddyfile_only() {
+  local acme_email
+
+  discover_environments
+  if [[ ${#DISCOVERED_ENVS[@]} -eq 0 ]]; then
+    error "Nessun environment trovato (dev/stage/prod con .env) in ${BASE_DIR}."
+    return 1
+  fi
+
+  acme_email="$(read_env_var "${BASE_DIR}/.env.shared" ACME_EMAIL)"
+  if [[ -z "$acme_email" ]]; then
+    error "ACME_EMAIL mancante in .env.shared."
+    return 1
+  fi
+
+  generate_caddyfile "$acme_email" || return 1
+
+  info "Per applicare il Caddyfile: docker compose --env-file .env.shared -f docker-compose.shared.yml exec caddy caddy reload --config /etc/caddy/Caddyfile"
 }
 
 generate_postgres_init() {
@@ -1030,7 +1129,7 @@ setup_shared() {
     prune_redundant_env_vars "$env" "${BASE_DIR}/${env}" || return 1
   done
 
-  generate_caddyfile "$acme_email"
+  generate_caddyfile "$acme_email" || return 1
   generate_postgres_init || return 1
   generate_shared_compose
   regenerate_env_compose_files || return 1
@@ -1149,6 +1248,8 @@ print_summary() {
 
 # --- Main ---
 main() {
+  if [[ "${1:-}" == "caddyfile" ]]; then regenerate_caddyfile_only; exit $?; fi
+
   echo
   echo "========================================"
   echo " Asso-P2B — Inizializzazione VPS"
